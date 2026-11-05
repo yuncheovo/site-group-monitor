@@ -106,6 +106,14 @@ def _needs_screenshot(url: str) -> bool:
     return "baidu.com/s" in text or "/s?" in text
 
 
+def page_wait_seconds(url: str, settle_ms: int, timeout: float) -> float:
+    """返回页面内容轮询时长；百度结果页需等待异步结果区渲染。"""
+    configured = max(0.2, float(settle_ms) / 1000.0)
+    if _needs_screenshot(url):
+        return min(max(0.2, float(timeout)), max(5.0, configured))
+    return min(max(0.2, float(timeout)), configured)
+
+
 def _html_ready(url: str, html: str, href: str) -> bool:
     """页面已经能判定收录或抽 TDK 时提前结束等待。"""
     text = html or ""
@@ -787,7 +795,7 @@ class LocalBrowser:
                         session_id=session_id,
                         timeout=2.5,
                     )
-        deadline = time.monotonic() + (self._settle_ms() / 1000.0)
+        deadline = time.monotonic() + page_wait_seconds(url, self._settle_ms(), timeout)
         html, href = "", url
         while True:
             html, href = await self._eval_html(session_id)

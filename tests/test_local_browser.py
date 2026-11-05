@@ -13,6 +13,7 @@ from site_group_monitor.core.local_browser import (
     chrome_proxy_server,
     find_browser_executable,
     parse_wmic_profile_pids,
+    page_wait_seconds,
 )
 from site_group_monitor.models.entities import ProxyEndpoint
 
@@ -44,6 +45,8 @@ def test_html_ready_and_screenshot_only_for_baidu_search() -> None:
     assert _html_ready("https://www.baidu.com/s", search_html, "https://www.baidu.com/s") is True
     assert _html_ready("https://www.baidu.com/s", "<div id='content_left'>" + ("x" * 900), "https://www.baidu.com/s") is False
     assert _html_ready("https://example.com/", "<html><title>页面加载中</title></html>", "https://example.com/") is False
+    assert page_wait_seconds("https://www.baidu.com/s?wd=site:x.com", 600, 25) == 5.0
+    assert page_wait_seconds("https://example.com/", 600, 25) == 0.6
 
 
 def test_headed_launch_args_open_visible_window() -> None:

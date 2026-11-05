@@ -27,9 +27,8 @@ from site_group_monitor import __version__
 
 logger = logging.getLogger("gui")
 
-# 自定义 uvicorn 日志配置：用标准 logging.Formatter 取代 uvicorn 的 DefaultFormatter。
-# 原因：窗口化 exe（console=False）运行时 sys.stdout/stderr 为 None，DefaultFormatter 会
-# 调用 stream.isatty() 而崩溃。这里既不用颜色逻辑，也不依赖 isatty。
+# 窗口化 exe（console=False）没有控制台输出流；uvicorn 的运行日志统一交由应用文件
+# 日志记录，禁用它自身的控制台 handler，避免后台请求反复触发 NoneType 写入异常。
 _GUI_LOG_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -45,14 +44,10 @@ _GUI_LOG_CONFIG = {
     },
     "handlers": {
         "default": {
-            "formatter": "default",
-            "class": "logging.StreamHandler",
-            "stream": "ext://sys.stderr",
+            "class": "logging.NullHandler",
         },
         "access": {
-            "formatter": "access",
-            "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout",
+            "class": "logging.NullHandler",
         },
     },
     "loggers": {
