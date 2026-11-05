@@ -5,7 +5,7 @@
     pip install pyinstaller
     pyinstaller sgm.spec --noconfirm
 
-产物示例：`dist/站群监控-v0.1.8.exe`
+产物示例：`dist/站群监控-v0.1.9.exe`
 """
 
 from pathlib import Path

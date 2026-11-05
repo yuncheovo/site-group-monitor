@@ -121,6 +121,7 @@ class BaiduSubmitService:
         if self._cancel.is_set():
             return
 
+        self._set_status("running", f"正在填写并提交 {domain}")
         clicked = await browser.evaluate_value(_fill_and_click_script(root_url), timeout=10)
         if not isinstance(clicked, dict) or not clicked.get("clicked"):
             reason = str((clicked or {}).get("message") or "未找到提交按钮") \
@@ -132,6 +133,16 @@ class BaiduSubmitService:
         if self._cancel.is_set():
             return
         page = await self._page_state(browser)
+        if not page.get("submissionChanged"):
+            # 百度会预填 URL，前端组件有时不会把脚本赋值视为一次用户输入；
+            # 若第一次点击后页面完全没变化，再用完整鼠标事件重试一次。
+            self._set_status("running", f"首次点击未返回结果，正在重试 {domain}")
+            clicked = await browser.evaluate_value(
+                _fill_and_click_script(root_url, force_mouse_events=True), timeout=10
+            )
+            if isinstance(clicked, dict) and clicked.get("clicked"):
+                await self._cancelable_delay(2.0)
+                page = await self._page_state(browser)
         if page.get("captcha"):
             self._set_status("waiting_captcha", f"{domain} 出现验证码，请在浏览器中手动完成")
             page = await self._wait_until_captcha_done(browser, timeout=300.0)
@@ -230,11 +241,17 @@ class BaiduSubmitService:
 _PAGE_STATE_JS = r"""
 (() => {
   const visible = (el) => !!el && el.getClientRects().length > 0;
-  const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
+  const inputs = Array.from(document.querySelectorAll(
+    'input.mod-big-input,input.ant-input,textarea.ant-input,textarea,input[type="text"],input[type="url"],input:not([type])'
+  ));
   const body = document.body ? document.body.innerText : '';
-  const buttons = Array.from(document.querySelectorAll('button,[role="button"]')).filter(visible);
-  const submitButton = buttons.find(el => /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
-    buttons.find(el => /提交/.test((el.innerText || '').trim()));
+  const buttons = Array.from(document.querySelectorAll(
+    'button.btn-mid-blue,button.ant-btn-primary,.ant-btn-primary,button,input[type="submit"],[role="button"],a'
+  )).filter(visible);
+  const buttonText = (el) => (el.innerText || el.value || el.textContent || '')
+    .replace(/\s+/g, '').trim();
+  const submitButton = buttons.find(el => /^(提交|确认提交|立即提交)$/.test(buttonText(el))) ||
+    buttons.find(el => /提交/.test(buttonText(el)));
   const hasSubmitCopy = /链接提交|普通收录|提交链接|请(?:输入|填写).*(?:链接|网址|地址)/.test(body);
   const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
     `${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`
@@ -257,8 +274,11 @@ _PAGE_STATE_JS = r"""
     /\/login/.test(location.pathname);
   const loggedOut = !!passwordInput || loginPage ||
     /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body);
-  const submitFormReady = !!input && !!submitButton &&
-    hasSubmitCopy;
+  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' && /\/linksubmit\/url/.test(location.pathname);
+  const submitFormReady = !!input && !!submitButton && (hasSubmitCopy || onSubmitPage);
+  const inputValue = input ? (input.value || '') : '';
+  const submissionChanged = !!feedback || !!captchaNode || !inputValue.trim() ||
+    /提交成功|已提交|提交完成|已收录|配额已用完|超出限额|提交失败|无权限|站点未验证/.test(body);
   return {
     href: location.href,
     onResourceSite,
@@ -266,7 +286,10 @@ _PAGE_STATE_JS = r"""
     hasInput: submitFormReady && !loggedOut,
     loggedOut,
     captcha: !!captchaNode,
-    inputValue: input ? (input.value || '') : '',
+    inputValue,
+    submissionChanged,
+    inputType: input ? (input.type || input.tagName || '') : '',
+    submitText: submitButton ? buttonText(submitButton) : '',
     feedback,
     body: body.slice(-5000),
   };
@@ -274,18 +297,24 @@ _PAGE_STATE_JS = r"""
 """
 
 
-def _fill_and_click_script(url: str) -> str:
+def _fill_and_click_script(url: str, *, force_mouse_events: bool = False) -> str:
     import json
 
     encoded = json.dumps(url, ensure_ascii=False)
     return rf"""
 (async () => {{
   const visible = (el) => !!el && el.getClientRects().length > 0;
-  const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
+  const inputs = Array.from(document.querySelectorAll(
+    'input.mod-big-input,input.ant-input,textarea.ant-input,textarea,input[type="text"],input[type="url"],input:not([type])'
+  ));
   const body = document.body ? document.body.innerText : '';
-  const buttons = Array.from(document.querySelectorAll('button,[role="button"]'));
-  const button = buttons.find(el => visible(el) && /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
-    buttons.find(el => visible(el) && /提交/.test((el.innerText || '').trim()));
+  const buttons = Array.from(document.querySelectorAll(
+    'button.btn-mid-blue,button.ant-btn-primary,.ant-btn-primary,button,input[type="submit"],[role="button"],a'
+  ));
+  const buttonText = (el) => (el.innerText || el.value || el.textContent || '')
+    .replace(/\s+/g, '').trim();
+  const button = buttons.find(el => visible(el) && /^(提交|确认提交|立即提交)$/.test(buttonText(el))) ||
+    buttons.find(el => visible(el) && /提交/.test(buttonText(el)));
   const hasSubmitCopy = /链接提交|普通收录|提交链接|请(?:输入|填写).*(?:链接|网址|地址)/.test(body);
   const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
     `${{el.placeholder || ''}} ${{el.getAttribute('aria-label') || ''}}`
@@ -297,19 +326,38 @@ def _fill_and_click_script(url: str) -> str:
     ? inputs.find(el => visible(el) && /^(https?:\/\/)?[^\s]*$/i.test(el.value || ''))
     : null);
   if (!input) return {{clicked:false, message:'未找到链接输入框'}};
-  if (!hasSubmitCopy) {{
+  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' && /\/linksubmit\/url/.test(location.pathname);
+  if (!hasSubmitCopy && !onSubmitPage) {{
     return {{clicked:false, message:'页面缺少链接提交区域'}};
   }}
-  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-  if (setter && setter.set) setter.set.call(input, {encoded}); else input.value = {encoded};
-  input.dispatchEvent(new Event('input', {{bubbles:true}}));
-  input.dispatchEvent(new Event('change', {{bubbles:true}}));
+  const prototype = input instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value');
+  const setValue = (value) => {{
+    input.focus();
+    if (setter && setter.set) setter.set.call(input, value); else input.value = value;
+    input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:value}}));
+    input.dispatchEvent(new Event('change', {{bubbles:true}}));
+  }};
+  setValue('');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  setValue({encoded});
   await new Promise(resolve => setTimeout(resolve, 200));
   if (!button) return {{clicked:false, message:'未找到提交按钮'}};
   if (button.disabled || button.getAttribute('aria-disabled') === 'true') {{
     return {{clicked:false, message:'提交按钮当前不可用'}};
   }}
-  button.click();
-  return {{clicked:true, message:'已点击提交'}};
+  button.scrollIntoView({{block:'center', inline:'center'}});
+  button.focus();
+  if ({str(force_mouse_events).lower()}) {{
+    for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {{
+      const EventClass = type.startsWith('pointer') && typeof PointerEvent !== 'undefined'
+        ? PointerEvent : MouseEvent;
+      button.dispatchEvent(new EventClass(type, {{bubbles:true, cancelable:true, view:window, button:0}}));
+    }}
+  }} else {{
+    HTMLElement.prototype.click.call(button);
+  }}
+  return {{clicked:true, message:'已点击提交', buttonText:buttonText(button), inputValue:input.value || ''}};
 }})()
 """
