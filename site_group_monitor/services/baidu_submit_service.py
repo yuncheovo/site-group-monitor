@@ -235,13 +235,16 @@ _PAGE_STATE_JS = r"""
   const buttons = Array.from(document.querySelectorAll('button,[role="button"]')).filter(visible);
   const submitButton = buttons.find(el => /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
     buttons.find(el => /提交/.test((el.innerText || '').trim()));
+  const hasSubmitCopy = /链接提交|普通收录|提交链接|请(?:输入|填写).*(?:链接|网址|地址)/.test(body);
   const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
     `${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`
   )) || inputs.find(el => {
     if (!visible(el) || /搜索|账号|密码|手机|邮箱/.test(el.placeholder || '')) return false;
-    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"]') || {}).innerText || '';
-    return /链接提交|普通收录|请输入.*(?:链接|网址)/.test(areaText);
-  });
+    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"],section') || {}).innerText || '';
+    return /链接提交|普通收录|请(?:输入|填写).*(?:链接|网址|地址)/.test(areaText);
+  }) || (hasSubmitCopy && submitButton
+    ? inputs.find(el => visible(el) && /^(https?:\/\/)?[^\s]*$/i.test(el.value || ''))
+    : null);
   const passwordInput = Array.from(document.querySelectorAll('input[type="password"]')).find(visible);
   const feedbackNodes = Array.from(document.querySelectorAll(
     '.ant-message-notice-content,.ant-message,.toast,.message,[role="alert"]'
@@ -255,7 +258,7 @@ _PAGE_STATE_JS = r"""
   const loggedOut = !!passwordInput || loginPage ||
     /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body);
   const submitFormReady = !!input && !!submitButton &&
-    /链接提交|普通收录|提交链接|请输入.*(?:链接|网址)/.test(body);
+    hasSubmitCopy;
   return {
     href: location.href,
     onResourceSite,
@@ -280,15 +283,21 @@ def _fill_and_click_script(url: str) -> str:
   const visible = (el) => !!el && el.getClientRects().length > 0;
   const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
   const body = document.body ? document.body.innerText : '';
+  const buttons = Array.from(document.querySelectorAll('button,[role="button"]'));
+  const button = buttons.find(el => visible(el) && /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
+    buttons.find(el => visible(el) && /提交/.test((el.innerText || '').trim()));
+  const hasSubmitCopy = /链接提交|普通收录|提交链接|请(?:输入|填写).*(?:链接|网址|地址)/.test(body);
   const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
     `${{el.placeholder || ''}} ${{el.getAttribute('aria-label') || ''}}`
   )) || inputs.find(el => {{
     if (!visible(el) || /搜索|账号|密码|手机|邮箱/.test(el.placeholder || '')) return false;
-    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"]') || {{}}).innerText || '';
-    return /链接提交|普通收录|请输入.*(?:链接|网址)/.test(areaText);
-  }});
+    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"],section') || {{}}).innerText || '';
+    return /链接提交|普通收录|请(?:输入|填写).*(?:链接|网址|地址)/.test(areaText);
+  }}) || (hasSubmitCopy && button
+    ? inputs.find(el => visible(el) && /^(https?:\/\/)?[^\s]*$/i.test(el.value || ''))
+    : null);
   if (!input) return {{clicked:false, message:'未找到链接输入框'}};
-  if (!/链接提交|普通收录|提交链接|请输入.*(?:链接|网址)/.test(body)) {{
+  if (!hasSubmitCopy) {{
     return {{clicked:false, message:'页面缺少链接提交区域'}};
   }}
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
@@ -296,9 +305,6 @@ def _fill_and_click_script(url: str) -> str:
   input.dispatchEvent(new Event('input', {{bubbles:true}}));
   input.dispatchEvent(new Event('change', {{bubbles:true}}));
   await new Promise(resolve => setTimeout(resolve, 200));
-  const buttons = Array.from(document.querySelectorAll('button,[role="button"]'));
-  const button = buttons.find(el => visible(el) && /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
-    buttons.find(el => visible(el) && /提交/.test((el.innerText || '').trim()));
   if (!button) return {{clicked:false, message:'未找到提交按钮'}};
   if (button.disabled || button.getAttribute('aria-disabled') === 'true') {{
     return {{clicked:false, message:'提交按钮当前不可用'}};

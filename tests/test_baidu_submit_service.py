@@ -30,6 +30,8 @@ def test_fill_script_safely_embeds_url() -> None:
     assert "submitFormReady && !loggedOut" in _PAGE_STATE_JS
     assert "input[type=\"password\"]" in _PAGE_STATE_JS
     assert "链接提交|普通收录" in _PAGE_STATE_JS
+    assert "请(?:输入|填写)" in _PAGE_STATE_JS
+    assert "https?:\\/\\/" in _PAGE_STATE_JS
     assert "passport" in _PAGE_STATE_JS
 
 
