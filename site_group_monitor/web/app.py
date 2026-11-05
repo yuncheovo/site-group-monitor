@@ -23,7 +23,7 @@ from site_group_monitor.services.site_service import health_of
 from site_group_monitor.utils.errors import SgmError
 from site_group_monitor.utils.logging import get_logger
 from site_group_monitor.web.deps import Container, build_container, get_container
-from site_group_monitor.web.routers import overview, reports, sites, system
+from site_group_monitor.web.routers import baidu_submit, overview, reports, sites, system
 from site_group_monitor.web.schemas import fail, ok
 
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "")
@@ -83,6 +83,7 @@ def create_app(container: Container | None = None, settings: Settings | None = N
     app.include_router(sites.router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
+    app.include_router(baidu_submit.router, prefix=api_prefix)
 
     # ---------------- 静态资源（最后挂载，避免覆盖 API）
     static_dir = _resolve_static_dir(settings)

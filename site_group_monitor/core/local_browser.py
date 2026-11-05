@@ -469,10 +469,20 @@ class _Cdp:
 class LocalBrowser:
     """本机浏览器会话：按代理重启进程，页面拉取串行。"""
 
-    def __init__(self, settings: Any | None = None, logger: Any | None = None, *, slot: int = 0) -> None:
+    def __init__(
+        self,
+        settings: Any | None = None,
+        logger: Any | None = None,
+        *,
+        slot: int = 0,
+        profile_name: str = "",
+    ) -> None:
         self.settings = settings
         self.logger = logger
         self._slot = max(0, int(slot))
+        self._profile_name = "".join(
+            char for char in str(profile_name or "") if char.isalnum() or char in "-_"
+        )
         self._lock = asyncio.Lock()
         self._proc: subprocess.Popen[bytes] | None = None
         self._port = 0
@@ -512,7 +522,7 @@ class LocalBrowser:
             path = self.settings.resolve_path(raw)
         else:
             path = Path(raw)
-        path = path / f"w{self._slot}"
+        path = path / (self._profile_name or f"w{self._slot}")
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -596,6 +606,23 @@ class LocalBrowser:
         """启动浏览器进程（已在跑则复用，不关窗口）。"""
         async with self._lock:
             await self._ensure_running(self._launch_proxy(proxy))
+
+    async def evaluate_value(self, expression: str, *, timeout: float = 10.0) -> Any:
+        """在当前浏览器页面执行 JavaScript 并返回可序列化结果。"""
+        async with self._lock:
+            await self._ensure_running(None)
+            if self._cdp is None or not self._session_id:
+                raise RuntimeError("浏览器页面尚未就绪")
+            response = await self._cdp.send(
+                "Runtime.evaluate",
+                {"expression": expression, "returnByValue": True, "awaitPromise": True},
+                session_id=self._session_id,
+                timeout=max(1.0, float(timeout)),
+            )
+            result = (response.get("result") or {}).get("result") or {}
+            if result.get("subtype") == "error":
+                raise RuntimeError(str(result.get("description") or "页面脚本执行失败"))
+            return result.get("value")
 
     async def _ensure_running(self, proxy: ProxyEndpoint | None) -> None:
         key = proxy.key if proxy else "direct"

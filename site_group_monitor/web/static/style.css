@@ -70,6 +70,11 @@ body {
   line-height: 1.45;
 }
 .check-banner.hidden { display: none; }
+.submit-banner {
+  background: #fff7e8; color: #9a5200; padding: 8px 16px; font-size: 13px;
+  border-bottom: 1px solid #f2c28f; line-height: 1.45;
+}
+.submit-banner.hidden { display: none; }
 
 .container { padding: 16px; }
 

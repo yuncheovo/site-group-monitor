@@ -166,4 +166,16 @@ def test_index_page_available(client: TestClient) -> None:
         assert "site-del" in body or "drawerDelete" in body
         assert 'id="btnRetryFailed"' in body
         assert 'id="btnCopySelected"' in body
+        assert 'id="btnBaiduSubmit"' in body
     _ = utcnow_iso()
+
+
+def test_baidu_submit_status_and_empty_run(client: TestClient) -> None:
+    """百度提交仅保留浏览器模式，空库不能启动任务。"""
+    status = _envelope(client.get("/api/baidu-submit/status").json())
+    assert status["status"] == "idle"
+    assert status["running"] is False
+
+    payload = client.post("/api/baidu-submit/run", json={"limit": 10}).json()
+    assert payload["code"] != 0
+    assert "未收录" in payload["message"]

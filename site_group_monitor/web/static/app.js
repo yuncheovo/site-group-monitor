@@ -22,6 +22,8 @@ const state = {
   checkingKey: '',
   selected: new Set(),
   failedTotal: 0,
+  notIndexedTotal: 0,
+  baiduSubmitRunning: false,
   checkLabel: '',
   statusTimer: null,
 };
@@ -90,6 +92,7 @@ async function loadOverview() {
     el('cTotal').textContent = data.total_sites;
     el('cIndexed').textContent = data.indexed_count ?? 0;
     el('cNotIndexed').textContent = data.not_indexed_count ?? 0;
+    state.notIndexedTotal = Number(data.not_indexed_count || 0);
     el('cUnknown').textContent = data.unknown_count ?? 0;
     state.failedTotal = Number(data.unknown_count || 0);
     updateSelectedButton();
@@ -725,6 +728,90 @@ async function cancelCheck() {
   }
 }
 
+/* ------------------------------------------------------------------ 百度资源平台浏览器提交 */
+let _submitStartedAt = 0;
+
+async function toggleBaiduSubmit() {
+  const button = el('btnBaiduSubmit');
+  if (state.baiduSubmitRunning) {
+    button.disabled = true;
+    button.textContent = '正在停止…';
+    try {
+      await api('/api/baidu-submit/cancel', { method: 'POST' });
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = '停止提交';
+      alert('停止提交失败：' + ((error && error.message) || '未知错误'));
+    }
+    return;
+  }
+
+  const selected = selectedDomains();
+  const available = selected.length || state.notIndexedTotal;
+  if (!available) {
+    alert('当前没有未收录站点可提交。');
+    return;
+  }
+  const count = Math.min(10, available);
+  const scope = selected.length ? `选中站点中的未收录项（最多 ${count} 个）` : `前 ${count} 个未收录站点`;
+  if (!confirm(`确认通过浏览器提交${scope}？\n首次使用请在弹出的百度资源平台窗口登录。`)) return;
+  button.disabled = true;
+  button.textContent = '正在启动…';
+  try {
+    const result = await api('/api/baidu-submit/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domains: selected, limit: 10 }),
+    });
+    state.baiduSubmitRunning = true;
+    _submitStartedAt = Date.now();
+    button.disabled = false;
+    button.textContent = '停止提交';
+    const banner = el('submitBanner');
+    banner.classList.remove('hidden');
+    banner.textContent = `已启动浏览器提交，共 ${result.count} 个站点。`;
+    pollBaiduSubmit();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = '提交未收录';
+    alert('启动提交失败：' + ((error && error.message) || '未知错误'));
+  }
+}
+
+async function pollBaiduSubmit() {
+  if (!state.baiduSubmitRunning) return;
+  try {
+    const data = await api('/api/baidu-submit/status');
+    const status = data.status || 'idle';
+    const running = data.running === true || ['running', 'waiting_login', 'waiting_captcha'].includes(status);
+    const banner = el('submitBanner');
+    banner.classList.remove('hidden');
+    banner.textContent = [
+      data.message || '正在提交…',
+      data.total ? `进度 ${data.done || 0}/${data.total}` : '',
+      data.current ? `当前：${data.current}` : '',
+    ].filter(Boolean).join('  ·  ');
+    if (!running) {
+      if (status === 'idle' && Date.now() - _submitStartedAt < 5000) {
+        setTimeout(pollBaiduSubmit, 500);
+        return;
+      }
+      state.baiduSubmitRunning = false;
+      const button = el('btnBaiduSubmit');
+      button.disabled = false;
+      button.textContent = '提交未收录';
+      setTimeout(() => banner.classList.add('hidden'), 5000);
+      const prefix = status === 'cancelled' ? '提交已取消' : '百度提交结束';
+      alert(`${prefix}：成功 ${data.success || 0}，失败 ${data.failed || 0}，已处理 ${data.done || 0}/${data.total || 0}。`);
+      return;
+    }
+    setTimeout(pollBaiduSubmit, 1000);
+  } catch (error) {
+    el('submitBanner').textContent = '提交进度读取失败，正在重试…';
+    setTimeout(pollBaiduSubmit, 1500);
+  }
+}
+
 
 function downloadReport(fmt) {
   window.location.href = `/api/reports/today/download?fmt=${fmt}`;
@@ -1229,6 +1316,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btnCheckSelected').addEventListener('click', () => triggerCheck(selectedDomains()));
   el('btnCopySelected').addEventListener('click', copySelectedDomains);
   el('btnRetryFailed').addEventListener('click', retryFailedSites);
+  el('btnBaiduSubmit').addEventListener('click', toggleBaiduSubmit);
   el('btnCancelCheck').addEventListener('click', cancelCheck);
   el('checkAllPage').addEventListener('change', (event) => {
     const checked = event.target.checked;

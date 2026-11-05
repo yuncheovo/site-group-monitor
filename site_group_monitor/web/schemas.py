@@ -151,6 +151,15 @@ class RunRequest(BaseModel):
     domains: list[str] = Field(default_factory=list)
 
 
+class BaiduSubmitRequest(BaseModel):
+    """百度资源平台浏览器提交请求（仅页面模式）。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    domains: list[str] = Field(default_factory=list)
+    limit: int = Field(default=10, ge=1, le=100)
+
+
 # ------------------------------------------------------------------ 响应模型
 class SiteItem(BaseModel):
     """站点列表项（含最新检测快照字段）。"""

@@ -16,6 +16,7 @@ from site_group_monitor.config.settings import Settings, get_settings, reload_se
 from site_group_monitor.scheduler.scheduler import Scheduler
 from site_group_monitor.services.alert_service import AlertService
 from site_group_monitor.services.audit_service import AuditService
+from site_group_monitor.services.baidu_submit_service import BaiduSubmitService
 from site_group_monitor.services.check_service import CheckService
 from site_group_monitor.services.diff_service import DiffService
 from site_group_monitor.services.report_service import ReportService
@@ -46,6 +47,7 @@ class Container:
         self.audit = AuditService(self.repos)
         self.sites = SiteService(self.repos, self.audit, self.settings)
         self.check = CheckService(self.repos, self.settings, self.logger, self.audit)
+        self.baidu_submit = BaiduSubmitService(self.settings, self.logger)
         self.diff = DiffService(self.repos, self.settings, self.logger)
         self.report = ReportService(self.repos, self.settings, self.logger)
         self.alert = AlertService(self.repos, self.settings, self.logger)
@@ -88,6 +90,7 @@ class Container:
         self.audit = AuditService(self.repos)
         self.sites = SiteService(self.repos, self.audit, self.settings)
         self.check = CheckService(self.repos, self.settings, self.logger, self.audit)
+        self.baidu_submit = BaiduSubmitService(self.settings, self.logger)
         self.diff = DiffService(self.repos, self.settings, self.logger)
         self.report = ReportService(self.repos, self.settings, self.logger)
         self.alert = AlertService(self.repos, self.settings, self.logger)
@@ -106,6 +109,7 @@ class Container:
 
     def shutdown(self) -> None:
         """释放资源（停止调度器）。"""
+        self.baidu_submit.cancel()
         try:
             self.scheduler.shutdown(wait=False)
         except Exception:  # noqa: BLE001
