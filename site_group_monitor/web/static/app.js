@@ -510,6 +510,7 @@ let _checkPolling = false;
 let _lastSitesReload = 0;
 let _checkSeenRunning = false;
 let _checkStartedAt = 0;
+let _checkCancelRequested = false;
 
 async function triggerCheck(domains, options) {
   if (_checkPolling) return;
@@ -548,6 +549,7 @@ async function triggerCheck(domains, options) {
 function startCheckPolling() {
   if (_checkPolling) return;
   _checkPolling = true;
+  _checkCancelRequested = false;
   _checkSeenRunning = false;
   _checkStartedAt = Date.now();
   el('btnCheck').disabled = true;
@@ -566,7 +568,10 @@ function stopCheckPolling() {
 function resetCheckButton() {
   el('btnCheck').disabled = false;
   el('btnCheck').textContent = '全部检测';
-  el('btnCancelCheck').classList.add('hidden');
+  const cancelButton = el('btnCancelCheck');
+  cancelButton.disabled = false;
+  cancelButton.textContent = '取消检测';
+  cancelButton.classList.add('hidden');
   updateSelectedButton();
 }
 
@@ -608,7 +613,11 @@ async function pollCheckStatus(failCount) {
       state.checkLabel = '';
       stopCheckPolling();
       refreshAll();
-      alert(`${label}检测完成：已处理 ${done}/${total}；本轮查询失败 ${unknown} 个；当前全部查询失败 ${allUnknown} 个。\n可点击“重查失败”再次查询剩余失败站点。`);
+      if (_checkCancelRequested) {
+        alert(`检测已取消：已处理 ${done}/${total}，其余站点未再执行。`);
+      } else {
+        alert(`${label}检测完成：已处理 ${done}/${total}；本轮查询失败 ${unknown} 个；当前全部查询失败 ${allUnknown} 个。\n可点击“重查失败”再次查询剩余失败站点。`);
+      }
       return;
     }
     const now = Date.now();
@@ -701,9 +710,17 @@ async function copySelectedDomains() {
 
 async function cancelCheck() {
   try {
+    _checkCancelRequested = true;
+    const button = el('btnCancelCheck');
+    button.disabled = true;
+    button.textContent = '正在取消…';
     await api('/api/system/cancel', { method: 'POST' });
-    el('cProgress').textContent = '已发送取消请求，正在收尾…';
+    el('cProgress').textContent = '正在停止浏览器请求并清空待检测队列…';
   } catch (error) {
+    _checkCancelRequested = false;
+    const button = el('btnCancelCheck');
+    button.disabled = false;
+    button.textContent = '取消检测';
     alert('取消失败：' + ((error && error.message) || '未知错误'));
   }
 }

@@ -18,7 +18,7 @@ from typing import Any, Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from site_group_monitor.models.enums import RunMode
+from site_group_monitor.models.enums import RunMode, RunStatus
 from site_group_monitor.notify.mailer import MailNotifier
 from site_group_monitor.utils.timeutil import parse_hhmm, today_str, utcnow_iso
 
@@ -262,6 +262,16 @@ class Scheduler:
             run_summary = (
                 self._await(check_service.run_all(mode, domains=domains)) if check_service else None
             )
+            if run_summary is not None and run_summary.status == RunStatus.CANCELLED.value:
+                result = {
+                    "status": RunStatus.CANCELLED.value,
+                    "stat_date": stat_date,
+                    "task_id": run_summary.task_id,
+                    "run": run_summary.to_dict(),
+                    "message": run_summary.message or "任务已取消",
+                }
+                self._last_result = result
+                return result
 
             # ② 快照
             diff_service = self.services.get("diff")

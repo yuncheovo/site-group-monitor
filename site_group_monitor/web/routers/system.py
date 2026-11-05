@@ -78,6 +78,8 @@ async def trigger_run(
     container.audit.log("web", "check.trigger", mode,
                         {"mode": mode, "notify": payload.notify, "export": payload.export,
                          "domains": domains[:20], "count": len(domains)})
+    # 在后台线程启动前就建立共享取消令牌，用户立即点击取消也不会丢信号。
+    container.check.prepare_run()
     threading.Thread(
         target=container.scheduler.run_pipeline,
         kwargs={

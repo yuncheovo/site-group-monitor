@@ -237,7 +237,11 @@ async def _guarded(task: Any, timeout: float, default: Any, wait_for: float | No
             task.cancel()
         return default
     except asyncio.CancelledError:
-        return default
+        # 外层批次取消必须继续向上传播；吞掉该异常会让 Worker 转而执行后续
+        # TDK/状态步骤，表现为点击“取消检测”后仍持续几十秒。
+        if not task.done():
+            task.cancel()
+        raise
     except Exception:  # noqa: BLE001 - 采集内核异常一律降级
         return default
 

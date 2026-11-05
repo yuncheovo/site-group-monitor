@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Sequence
@@ -34,8 +35,13 @@ from site_group_monitor.utils.timeutil import epoch_ms, utcnow_iso
 class CancelToken:
     """协作式取消令牌（CLI Ctrl+C 与 Web 停止按钮共用）。"""
 
-    cancelled: bool = False
     reason: str = ""
+    _event: threading.Event = field(default_factory=threading.Event, repr=False)
+
+    @property
+    def cancelled(self) -> bool:
+        """是否已收到取消请求（可安全跨线程读取）。"""
+        return self._event.is_set()
 
     def cancel(self, reason: str = "用户中断") -> None:
         """请求取消。
@@ -43,8 +49,8 @@ class CancelToken:
         Args:
             reason: 取消原因。
         """
-        self.cancelled = True
         self.reason = reason
+        self._event.set()
 
 
 @dataclass
@@ -180,7 +186,10 @@ class CheckService:
         )
         self._active_worker = worker
         workers = 1 if single_target else max(1, int(concurrency or default_concurrency))
-        cancel_token = cancel_token or self._external_cancel
+        # 每轮任务都持有一个确定的令牌；Web API 与后台 asyncio 线程共享它。
+        # 旧实现直到点击取消才新建令牌，运行中的任务因此永远看不到取消信号。
+        cancel_token = cancel_token or self._external_cancel or CancelToken()
+        self._external_cancel = cancel_token
 
         self._state = _ProgressState(total=len(sites), concurrency=workers)
         self._running = True
@@ -200,6 +209,9 @@ class CheckService:
             if browser is not None and getattr(browser, "warm", None) is not None:
                 with contextlib.suppress(Exception):
                     await browser.warm()
+            if cancel_token.cancelled:
+                return self._finish(mode, started_iso, RunStatus.CANCELLED.value,
+                                    cancel_token.reason or "用户中断", http)
             batches = self._plan_batches(sites)
             semaphore = asyncio.Semaphore(workers)
             for batch_index, batch in enumerate(batches, start=1):
@@ -210,11 +222,22 @@ class CheckService:
                 await self._run_batch(
                     batch, worker, semaphore, limiter, proxies, mode, progress_cb, cancel_token
                 )
+                if cancel_token.cancelled:
+                    return self._finish(mode, started_iso, RunStatus.CANCELLED.value,
+                                        cancel_token.reason or "用户中断", http)
                 if batch_index < len(batches):
                     factor = 1.0 if (proxies and not proxies.is_empty()) else float(
                         getattr(self.settings.concurrency, "no_proxy_interval_factor", 1.8)
                     )
-                    await limiter.batch_pause(factor=factor)
+                    pause = asyncio.create_task(limiter.batch_pause(factor=factor))
+                    while not pause.done() and not cancel_token.cancelled:
+                        await asyncio.wait({pause}, timeout=0.1)
+                    if cancel_token.cancelled and not pause.done():
+                        pause.cancel()
+                        await asyncio.gather(pause, return_exceptions=True)
+                        return self._finish(mode, started_iso, RunStatus.CANCELLED.value,
+                                            cancel_token.reason or "用户中断", http)
+                    await pause
             status, message = self._result_status()
             return self._finish(mode, started_iso, status, message, http)
         except asyncio.CancelledError:
@@ -236,6 +259,8 @@ class CheckService:
                 with contextlib.suppress(Exception):
                     await browser.close()
             self._active_worker = None
+            if self._external_cancel is cancel_token:
+                self._external_cancel = None
 
     # ================================================================ 批次执行
     async def _run_batch(
@@ -269,23 +294,33 @@ class CheckService:
             for site in batch
         ]
         self._current_tasks.update(tasks)
+        pending = set(tasks)
         try:
-            for task in asyncio.as_completed(tasks):
+            while pending:
                 if cancel_token is not None and cancel_token.cancelled:
-                    for pending in tasks:
-                        if not pending.done():
-                            pending.cancel()
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    pending.clear()
                     break
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    break
-                except Exception as exc:  # noqa: BLE001 - 单站异常不影响批次
-                    if self.logger is not None:
-                        self.logger.warning("check_service: 单站任务异常 %s", exc)
-                    self._state.failed += 1
-                    self._state.done += 1
+                completed, pending = await asyncio.wait(
+                    pending, timeout=0.1, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in completed:
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:  # noqa: BLE001 - 单站异常不影响批次
+                        if self.logger is not None:
+                            self.logger.warning("check_service: 单站任务异常 %s", exc)
+                        self._state.failed += 1
+                        self._state.done += 1
         finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             self._current_tasks.difference_update(tasks)
 
     async def _run_one(
@@ -535,12 +570,22 @@ class CheckService:
         }
 
     def cancel(self) -> CancelToken:
-        """创建并使用一个取消令牌（内部保存，供 Web 停止接口调用）。
+        """取消当前任务使用的共享令牌（供 Web 停止接口调用）。
 
         Returns:
-            新的 :class:`CancelToken`。
+            当前任务的 :class:`CancelToken`。
         """
-        token = CancelToken(reason="用户通过 API 取消")
+        token = self._external_cancel or CancelToken()
+        token.cancel("用户通过 API 取消")
+        if self._running or self._external_cancel is not None:
+            self._external_cancel = token
+        return token
+
+    def prepare_run(self) -> CancelToken:
+        """在后台线程启动前建立取消令牌，消除“刚启动就取消”的竞态窗口。"""
+        if self._running and self._external_cancel is not None:
+            return self._external_cancel
+        token = CancelToken()
         self._external_cancel = token
         return token
 
