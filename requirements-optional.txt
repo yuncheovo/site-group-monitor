@@ -1,0 +1,12 @@
+# site_group_monitor 可选依赖（默认不安装，主链路不依赖）
+# 安装：pip install -r requirements-optional.txt
+
+# 验证码人工确认弹窗 / JS 渲染站点 TDK 兜底（P2，默认关闭）
+# 安装后还需执行：playwright install chromium
+playwright>=1.42.0
+
+# Windows 托盘常驻 / 开机自启（R-022，本期不做）
+pystray>=0.19.4
+
+# 未来扩展：Webhook / 钉钉 / 企业微信 等通知通道（本期不用）
+apprise>=1.7.0

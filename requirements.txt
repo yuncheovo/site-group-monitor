@@ -1,0 +1,39 @@
+# site_group_monitor 核心依赖（必需）
+# 说明：架构设计文档给定的是「最低版本」，这里使用最低版本约束而非硬锁定，
+# 以便在 Python 3.12/3.13 等新解释器上能取到官方预编译 wheel（如 lxml/cryptography/pydantic）。
+# 若需要做可复现交付，请执行 `pip freeze > requirements.lock.txt`。
+
+# ---------- CLI ----------
+click>=8.1.7                  # Click 子命令框架
+
+# ---------- 本地仪表盘 ----------
+fastapi>=0.110.3              # REST API 框架
+uvicorn[standard]>=0.29.0     # ASGI 服务器
+python-multipart>=0.0.9       # FastAPI 表单/文件上传支持
+
+# ---------- 模板与报告 ----------
+jinja2>=3.1.4                 # HTML 报告 / 邮件模板
+openpyxl>=3.1.2               # Excel 导出
+
+# ---------- HTTP / HTML / 编码 ----------
+httpx[http2]>=0.27.0          # 异步 HTTP 客户端（Cookie / 代理 / 精细 timeout）
+parsel>=1.8.1                 # 百度结果页 XPath/CSS 抽取
+beautifulsoup4>=4.12.3        # 破损 HTML 兜底解析
+lxml>=5.3.0                   # parsel / bs4 的高性能解析器
+charset-normalizer>=3.3.2     # GBK/GB18030 编码探测
+certifi>=2024.2.2             # CA 证书包（提升 SSL 握手稳定性）
+cryptography>=42.0.5          # X.509 证书解析（签发者 / 有效期 / 序列码）
+
+# ---------- 配置 / 模型 ----------
+pydantic>=2.6.4               # 实体与 API 模型
+pydantic-settings>=2.2.1      # 配置加载 + 环境变量覆盖
+pyyaml>=6.0.1                 # config.yaml 解析
+python-dateutil>=2.9.0        # 时区与日期运算
+tzdata>=2024.1                # Windows 上提供 zoneinfo 时区数据库（Asia/Shanghai）
+
+# ---------- 调度 / 重试 ----------
+apscheduler>=3.10.4           # 进程内定时调度（BackgroundScheduler）
+tenacity>=8.2.3               # 指数退避重试
+
+# ---------- 终端观感 ----------
+rich>=13.7.1                  # CLI 进度条 / 表格 / 彩色日志

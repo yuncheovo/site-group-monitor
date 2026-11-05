@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "site-group-monitor"
+version = "0.1.1"
+description = "站群百度收录 / TDK / 站点健康状态监控工具（本地 CLI + 本地仪表盘）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "site_group_monitor contributors" }]
+keywords = ["baidu", "index", "seo", "monitor", "site-group", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "click>=8.1.7",
+    "fastapi>=0.110.3",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
+    "jinja2>=3.1.4",
+    "httpx[http2]>=0.27.0",
+    "parsel>=1.8.1",
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "charset-normalizer>=3.3.2",
+    "certifi>=2024.2.2",
+    "cryptography>=42.0.5",
+    "pydantic>=2.6.4",
+    "pydantic-settings>=2.2.1",
+    "pyyaml>=6.0.1",
+    "apscheduler>=3.10.4",
+    "tenacity>=8.2.3",
+    "openpyxl>=3.1.2",
+    "rich>=13.7.1",
+    "python-dateutil>=2.9.0",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+optional = ["playwright>=1.42.0", "pystray>=0.19.4", "apprise>=1.7.0"]
+dev = ["pytest>=8.1.1", "pytest-asyncio>=0.23.6", "respx>=0.21.1"]
+
+[project.scripts]
+sgm = "site_group_monitor.cli.main:cli"
+
+[tool.setuptools]
+packages = [
+    "site_group_monitor",
+    "site_group_monitor.cli",
+    "site_group_monitor.config",
+    "site_group_monitor.core",
+    "site_group_monitor.models",
+    "site_group_monitor.notify",
+    "site_group_monitor.report",
+    "site_group_monitor.scheduler",
+    "site_group_monitor.services",
+    "site_group_monitor.storage",
+    "site_group_monitor.utils",
+    "site_group_monitor.web",
+    "site_group_monitor.web.routers",
+]
+
+[tool.setuptools.package-data]
+"*" = [
+    "*.sql",
+    "*.j2",
+    "*.html",
+    "*.css",
+    "*.js",
+    "*.yaml",
+    "*.yml",
+    "*.ico",
+    "*.png",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100

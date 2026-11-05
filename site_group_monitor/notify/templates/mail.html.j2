@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>站群监控 {{ report.stat_date if report else stat_date }}</title>
+</head>
+<body style="margin:0;padding:16px;background:#f4f6f8;font-family:-apple-system,'Segoe UI','Microsoft YaHei',Arial,sans-serif;color:#222;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:720px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+    <tr>
+      <td style="background:#2f6fed;color:#fff;padding:16px 20px;font-size:18px;font-weight:600;">
+        站群监控 · {{ report.stat_date if report else stat_date }}
+      </td>
+    </tr>
+
+    {% if report %}
+    <tr>
+      <td style="padding:16px 20px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="33%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">今日收录率</div>
+              <div style="font-size:22px;font-weight:600;">{{ index_rate_pct }}%</div>
+            </td>
+            <td width="33%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">昨日</div>
+              <div style="font-size:22px;font-weight:600;color:#666;">{{ prev_rate_pct }}%</div>
+            </td>
+            <td width="34%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">查询失败</div>
+              <div style="font-size:22px;font-weight:600;color:#ef6c00;">{{ report.need_manual|length }}</div>
+            </td>
+          </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">
+          <tr>
+            <td width="25%" style="padding:8px;font-size:13px;">监控站点 <b>{{ report.total_sites }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">已收录 <b style="color:#2e7d32;">{{ report.indexed_count }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">未收录 <b style="color:#c62828;">{{ report.not_indexed_count }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">异常 <b style="color:#ef6c00;">{{ report.anomalous_count }}</b></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">掉收录（{{ report.lost_indexed|length }}）</h3>
+        {% if report.lost_indexed %}
+        <table width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <tr style="background:#fafafa;"><th align="left">域名</th><th align="left">旧值</th><th align="left">新值</th><th align="left">HTTP</th></tr>
+          {% for item in report.lost_indexed[:50] %}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td>{{ item.domain }}</td>
+            <td>{{ item.old_value }}</td>
+            <td style="color:#c62828;">{{ item.new_value }}</td>
+            <td>{{ item.detail.http_status|default('-') }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div style="font-size:13px;color:#999;">今日无掉收录站点。</div>
+        {% endif %}
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">新增收录（{{ report.new_indexed|length }}）</h3>
+        {% if report.new_indexed %}
+        <ul style="margin:0;padding-left:18px;font-size:13px;">
+          {% for item in report.new_indexed[:50] %}<li>{{ item.domain }}（{{ item.group_name }}）</li>{% endfor %}
+        </ul>
+        {% else %}
+        <div style="font-size:13px;color:#999;">今日无新增收录。</div>
+        {% endif %}
+      </td>
+    </tr>
+
+    {% if report.need_manual %}
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">查询失败（{{ report.need_manual|length }}）</h3>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:#666;">
+          {% for item in report.need_manual[:50] %}
+          <li>{{ item.domain }} —— {{ item.reason|default('unknown') }}</li>
+          {% endfor %}
+        </ul>
+        <div style="font-size:12px;color:#999;margin-top:6px;">
+          以上站点因验证码、网络或解析失败未能得出收录结论，不计入收录率。
+        </div>
+      </td>
+    </tr>
+    {% endif %}
+
+    {% if report.notes %}
+    <tr>
+      <td style="padding:0 20px 16px 20px;">
+        {% for note in report.notes %}
+        <div style="background:#fff8e1;border-left:3px solid #ffc107;padding:8px 12px;font-size:12px;margin:4px 0;">{{ note }}</div>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endif %}
+    {% endif %}
+
+    {% if alerts %}
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">告警清单（{{ alerts|length }}）</h3>
+        <table width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <tr style="background:#fafafa;"><th align="left">级别</th><th align="left">类型</th><th align="left">域名</th><th align="left">说明</th></tr>
+          {% for alert in alerts[:100] %}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td>
+              {% if alert.level == 'critical' %}
+                <span style="background:#c62828;color:#fff;padding:1px 7px;border-radius:10px;font-size:12px;">严重</span>
+              {% else %}
+                <span style="background:#ef6c00;color:#fff;padding:1px 7px;border-radius:10px;font-size:12px;">警告</span>
+              {% endif %}
+            </td>
+            <td>{{ alert.event_type }}</td>
+            <td>{{ alert.domain }}</td>
+            <td style="color:#666;">{{ alert.detail }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </td>
+    </tr>
+    {% endif %}
+
+    <tr>
+      <td style="padding:12px 20px;background:#fafafa;color:#999;font-size:12px;">
+        本邮件由 site_group_monitor 在本机生成并发送 · 完整报告（HTML/Excel）保存在本机 data/reports 目录
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>站群监控 {{ report.stat_date if report else stat_date }}</title>
+</head>
+<body style="margin:0;padding:16px;background:#f4f6f8;font-family:-apple-system,'Segoe UI','Microsoft YaHei',Arial,sans-serif;color:#222;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:720px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+    <tr>
+      <td style="background:#2f6fed;color:#fff;padding:16px 20px;font-size:18px;font-weight:600;">
+        站群监控 · {{ report.stat_date if report else stat_date }}
+      </td>
+    </tr>
+
+    {% if report %}
+    <tr>
+      <td style="padding:16px 20px;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td width="33%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">今日收录率</div>
+              <div style="font-size:22px;font-weight:600;">{{ index_rate_pct }}%</div>
+            </td>
+            <td width="33%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">昨日</div>
+              <div style="font-size:22px;font-weight:600;color:#666;">{{ prev_rate_pct }}%</div>
+            </td>
+            <td width="34%" style="padding:8px;">
+              <div style="font-size:12px;color:#777;">查询失败</div>
+              <div style="font-size:22px;font-weight:600;color:#ef6c00;">{{ report.need_manual|length }}</div>
+            </td>
+          </tr>
+        </table>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">
+          <tr>
+            <td width="25%" style="padding:8px;font-size:13px;">监控站点 <b>{{ report.total_sites }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">已收录 <b style="color:#2e7d32;">{{ report.indexed_count }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">未收录 <b style="color:#c62828;">{{ report.not_indexed_count }}</b></td>
+            <td width="25%" style="padding:8px;font-size:13px;">异常 <b style="color:#ef6c00;">{{ report.anomalous_count }}</b></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">掉收录（{{ report.lost_indexed|length }}）</h3>
+        {% if report.lost_indexed %}
+        <table width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <tr style="background:#fafafa;"><th align="left">域名</th><th align="left">旧值</th><th align="left">新值</th><th align="left">HTTP</th></tr>
+          {% for item in report.lost_indexed[:50] %}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td>{{ item.domain }}</td>
+            <td>{{ item.old_value }}</td>
+            <td style="color:#c62828;">{{ item.new_value }}</td>
+            <td>{{ item.detail.http_status|default('-') }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div style="font-size:13px;color:#999;">今日无掉收录站点。</div>
+        {% endif %}
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">新增收录（{{ report.new_indexed|length }}）</h3>
+        {% if report.new_indexed %}
+        <ul style="margin:0;padding-left:18px;font-size:13px;">
+          {% for item in report.new_indexed[:50] %}<li>{{ item.domain }}（{{ item.group_name }}）</li>{% endfor %}
+        </ul>
+        {% else %}
+        <div style="font-size:13px;color:#999;">今日无新增收录。</div>
+        {% endif %}
+      </td>
+    </tr>
+
+    {% if report.need_manual %}
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">待人工确认（{{ report.need_manual|length }}）</h3>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:#666;">
+          {% for item in report.need_manual[:50] %}
+          <li>{{ item.domain }} —— {{ item.reason|default('unknown') }}</li>
+          {% endfor %}
+        </ul>
+        <div style="font-size:12px;color:#999;margin-top:6px;">
+          以上站点证据不足（验证码/网络/结构异常），降级为「待确认」，不计入收录率、不参与 diff。
+        </div>
+      </td>
+    </tr>
+    {% endif %}
+
+    {% if report.notes %}
+    <tr>
+      <td style="padding:0 20px 16px 20px;">
+        {% for note in report.notes %}
+        <div style="background:#fff8e1;border-left:3px solid #ffc107;padding:8px 12px;font-size:12px;margin:4px 0;">{{ note }}</div>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endif %}
+    {% endif %}
+
+    {% if alerts %}
+    <tr>
+      <td style="padding:0 20px 12px 20px;">
+        <h3 style="font-size:15px;margin:12px 0 6px 0;">告警清单（{{ alerts|length }}）</h3>
+        <table width="100%" cellpadding="6" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <tr style="background:#fafafa;"><th align="left">级别</th><th align="left">类型</th><th align="left">域名</th><th align="left">说明</th></tr>
+          {% for alert in alerts[:100] %}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td>
+              {% if alert.level == 'critical' %}
+                <span style="background:#c62828;color:#fff;padding:1px 7px;border-radius:10px;font-size:12px;">严重</span>
+              {% else %}
+                <span style="background:#ef6c00;color:#fff;padding:1px 7px;border-radius:10px;font-size:12px;">警告</span>
+              {% endif %}
+            </td>
+            <td>{{ alert.event_type }}</td>
+            <td>{{ alert.domain }}</td>
+            <td style="color:#666;">{{ alert.detail }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </td>
+    </tr>
+    {% endif %}
+
+    <tr>
+      <td style="padding:12px 20px;background:#fafafa;color:#999;font-size:12px;">
+        本邮件由 site_group_monitor 在本机生成并发送 · 完整报告（HTML/Excel）保存在本机 data/reports 目录
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

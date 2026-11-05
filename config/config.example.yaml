@@ -1,0 +1,139 @@
+# ============================================================================
+# site_group_monitor 全量默认配置模板（带注释）
+# 作用：
+#   1) 首次运行会尝试复制为 data/config.yaml 作为「用户级配置」；
+#   2) 代码内 DEFAULT_CONFIG 与本文件保持一致（config/settings.py 中的字典为权威默认值）。
+# 配置优先级（后者覆盖前者）：
+#   代码内 DEFAULT_CONFIG  <  data/config.yaml  <  环境变量 SGM_*（嵌套用双下划线）
+# 示例：SGM_SMTP__PASSWORD=xxx、SGM_BAIDU__MIN_INTERVAL_SEC=5
+#       注意：环境变量路径省略了 engine. 层级段，settings.py 内部做了别名映射。
+# ============================================================================
+
+app:
+  name: site_group_monitor
+  display_timezone: Asia/Shanghai   # 展示时区（stat_date 与报告时间按此计算）
+  log_level: INFO                   # DEBUG / INFO / WARNING / ERROR
+
+storage:
+  db_path: data/monitor.db          # SQLite 主库路径（相对项目根目录）
+  wal: true                         # WAL 日志模式
+  busy_timeout_ms: 5000             # 锁等待
+  backup:
+    enabled: true                   # 每日报告后 VACUUM INTO 备份
+    keep: 7                         # 保留份数
+
+http:
+  timeout_connect: 5                # 连接超时（秒）
+  timeout_read: 10                  # 读超时（秒）
+  timeout_total: 20                 # 总超时（秒）
+  timeout_pool: 3                   # 连接池等待超时（秒）
+  max_redirects: 5                  # 手动跟跳上限
+  verify_ssl: true                  # 是否校验目标站证书
+  pool_size: 200                    # httpx 连接池上限
+  headers_pool_size: 20             # UA/指纹池大小（<=40）
+  user_agent_rotation: true         # 每请求轮换 UA
+
+concurrency:
+  global_workers: 6                 # 全局并发协程数
+  per_proxy_workers: 1              # 单代理并发上限（防 IP 特征聚集）
+  no_proxy_workers: 3               # 无可用代理时降级并发
+  batch_size: 50                    # 每批站点数
+  batch_pause_sec: [20, 40]         # 批次间错峰休眠区间（jitter）
+  no_proxy_interval_factor: 1.8     # 无代理时限速间隔放大系数
+
+engine:
+  active: baidu                     # baidu / sogou / so360（本期仅 baidu 实现）
+  baidu:
+    search_url: https://www.baidu.com/s
+    rn: 10                          # 每页结果条数
+    min_interval_sec: 3.0           # 同一代理两次百度请求最小间隔
+    jitter: [0.6, 1.4]              # 间隔抖动倍率区间
+    max_retry: 4                    # 暂态错误重试次数（换代理）
+    http2: false                    # 默认关闭 HTTP/2（降低指纹识别）
+    max_requests_per_proxy: 25      # 单代理累计请求阈值
+    rest_after_threshold_sec: 45    # 达到阈值后的冷静期（含 ±20 jitter）
+    timeout_sec: 25                 # 百度请求单独总超时
+    retry_backoff_sec: [2, 4]       # 指数退避基准
+    narrow_recheck: true            # NO_DOMAIN_MATCH 时使用精确短语复核一次
+    captcha:
+      mode: degrade                 # degrade=降级 unknown + 落证据
+      max_rotate: 3                 # 旋转验证码换 IP 再查，最多 3 次（含首次）
+    evidence_dir: data/evidence     # 百度结果页证据目录
+    evidence_days: 30               # 证据保留天数
+    browser:
+      enabled: true                 # 用本机 Edge/Chrome 查收录和 TDK（独立配置，不占用日常浏览器）
+      channel: auto                 # auto / msedge / chrome
+      headless: false               # false=弹出可见 Edge/Chrome；true=后台无窗口
+      via_proxy: true               # 浏览器查百度和抓 TDK 使用代理池 IP；无可用代理时才直连降级
+      profile_dir: data/browser-profile
+      settle_ms: 600                # 页面就绪后最多再等多少毫秒（结果出来会提前结束）
+      windows: 1                    # 同时打开的查询窗口数（1–8）
+
+proxy:
+  enabled: true
+  auto_disable_health: 0.3          # 健康度低于此值自动禁用
+  fail_threshold: 3                 # 连续失败次数阈值
+  select_strategy: weighted_random  # weighted_random / round_robin
+  revive_after_minutes: 30          # 禁用代理复活探测间隔
+  acquire_timeout_sec: 5            # 代理繁忙/提取失败时快速直连降级，避免单站长时间排队
+
+scheduler:
+  enabled: true
+  mode: daily                       # daily / manual
+  daily_time: "09:00"               # 每日任务触发时间（display_timezone）
+  jitter_minutes: 30                # 启动时间随机抖动 0~30 分钟（错峰）
+  misfire_grace_sec: 3600
+  lock_sec: 7200                    # 任务互斥锁超时
+  incremental_sample_ratio: 0.0     # 白天抽样增量比例（0=关闭）
+
+alert:
+  enabled: true
+  index_rate_threshold: 0.70        # 收录率跌破该阈值告警
+  ssl_warn_days: 15                 # SSL 剩余天数预警阈值
+  unknown_persistent_days: 3        # 连续 unknown 天数阈值
+  quiet_hours: ["23:00", "07:30"]   # 静默时段（起-止，跨零点）
+  dedup_hours: 12                   # 同一事件去重冷却时长
+
+smtp:
+  enabled: false                    # 默认禁用；填入 host/user/password 后可启用
+  host: smtp.qq.com
+  port: 465
+  use_ssl: true
+  starttls: false
+  user: ""
+  password: ""                      # 建议用环境变量 SGM_SMTP__PASSWORD 注入，勿写入文件
+  sender: ""
+  recipients: []
+  subject_prefix: "[站群监控]"
+  timeout_sec: 20
+  retry: 3                          # 发送失败重试次数
+  retry_backoff_sec: [30, 90, 180]  # 重试退避间隔
+
+retention:
+  days: 180                         # check_results / daily_snapshots / change_events 保留天数
+  evidence_days: 30                 # 证据保留天数
+  audit_days: 365                   # 审计日志保留天数
+
+web:
+  host: 127.0.0.1                   # 安全默认值：仅本地环回
+  port: 8080
+  auth_enabled: false
+  static_dir: site_group_monitor/web/static
+
+tdk:
+  max_bytes: 524288                 # 首页流式读取上限 512KB
+  timeout_sec: 15
+  fallback_meta: true               # description 缺失回落 og/twitter
+  render_fallback:
+    enabled: false                  # 默认禁用 playwright 兜底
+    hint_selectors: ["__NEXT_DATA__", "#app", "#root"]
+    render_whitelist: []            # 命中 Brahitelist 的域名才允许旁路渲染
+
+import:
+  default_group: default
+  tag_separator: "|"
+  csv_delimiter: ","
+
+report:
+  dir: data/reports
+  keep_days: 365

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>百度安全验证</title>
+</head>
+<body>
+  <div class="wappass-wrap">
+    <div class="wappass-modal">
+      <h1 class="title">百度安全验证</h1>
+      <div class="tips">抱歉，您的访问可能存在异常，请完成以下安全验证后继续访问。</div>
+      <form id="SeccodeForm" action="/su/" method="post">
+        <input id="SeccodeInput" name="seccode" class="seccode-input" placeholder="请输入验证码"/>
+        <img class="captcha-img" src="//wappass.baidu.com/static/captcha/img/123456.jpg"/>
+        <button class="pass-button submit-btn" type="submit">提交验证</button>
+      </form>
+      <div class="footer">异常流量提醒：http://bs.baidu.com/antispider/</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,65 @@
+# ============================================================================
+# logging dictConfig 配置
+# 占位符 {log_dir} / {level} 由 utils/logging.py::setup_logging 运行时替换。
+# 终端输出走 rich.Highlighter 友好的格式；文件走 RotatingFileHandler 滚动。
+# ============================================================================
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  brief:
+    format: "%(message)s"
+    datefmt: "%H:%M:%S"
+  standard:
+    format: "[%(asctime)s][%(levelname)s][%(name)s] %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console:
+    class: rich.logging.RichHandler
+    level: "{level}"
+    formatter: brief
+    rich_tracebacks: true
+    show_path: false
+    show_time: true
+    markup: true
+
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: "{level}"
+    formatter: standard
+    filename: "{log_dir}/sgm.log"
+    maxBytes: 10485760
+    backupCount: 5
+    encoding: utf-8
+
+  error_file:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: standard
+    filename: "{log_dir}/sgm.error.log"
+    maxBytes: 5242880
+    backupCount: 3
+    encoding: utf-8
+
+root:
+  level: "{level}"
+  handlers: [console, file, error_file]
+
+loggers:
+  httpx:
+    level: WARNING
+    propagate: true
+    handlers: []
+  httpcore:
+    level: WARNING
+    propagate: true
+    handlers: []
+  apscheduler:
+    level: WARNING
+    propagate: true
+    handlers: []
+  asyncio:
+    level: WARNING
+    propagate: true
+    handlers: []

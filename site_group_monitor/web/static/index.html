@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>站群监控</title>
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
+<link rel="stylesheet" href="/static/style.css"/>
+<script src="/static/vendor/echarts.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="/static/sgm-256.png" alt="" class="brand-icon"/>站群监控 <span id="appVersion" class="version-badge">v--</span></div>
+  <div class="toolbar">
+    <select id="groupFilter" title="分组筛选"><option value="">全部分组</option></select>
+    <input id="keywordInput" class="input" placeholder="搜索域名 / 标签 / 备注" />
+    <select id="statusFilter" title="收录状态">
+      <option value="">全部收录状态</option>
+      <option value="indexed">已收录</option>
+      <option value="not_indexed">未收录</option>
+      <option value="unknown_need_manual_check">查询失败</option>
+    </select>
+    <select id="healthFilter" title="健康度">
+      <option value="">全部健康度</option>
+      <option value="healthy">健康</option>
+      <option value="warn">预警</option>
+      <option value="abnormal">异常</option>
+      <option value="unknown">未知</option>
+    </select>
+    <select id="pageSize" title="每页条数">
+      <option value="50">50 / 页</option>
+      <option value="100">100 / 页</option>
+      <option value="200">200 / 页</option>
+    </select>
+    <button id="btnCheckSelected" class="btn" disabled>检测选中</button>
+    <button id="btnCheck" class="btn primary">全部检测</button>
+    <button id="btnCancelCheck" class="btn ghost hidden">取消检测</button>
+    <button id="btnReportHtml" class="btn">下载 HTML</button>
+    <button id="btnReportXlsx" class="btn">下载 Excel</button>
+    <button id="btnAddSite" class="btn primary btn-icon">
+      <svg class="btn-svg" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+      添加域名
+    </button>
+    <button id="btnProxy" class="btn">⚙ 代理配置</button>
+    <button id="btnRefresh" class="btn ghost">刷新</button>
+  </div>
+</header>
+<div id="checkBanner" class="check-banner hidden" role="status" aria-live="polite"></div>
+
+<main class="container">
+  <section class="cards" id="cards">
+    <div class="card card-filter" data-status="" title="查看全部站点" role="button" tabindex="0">
+      <div class="label">站点总数</div>
+      <div class="value" id="cTotal">-</div>
+      <div class="hint" id="cTotalHint">点击查看全部</div>
+    </div>
+    <div class="card card-filter" data-status="indexed" title="只看已收录" role="button" tabindex="0">
+      <div class="label">已收录</div>
+      <div class="value ok" id="cIndexed">-</div>
+      <div class="hint">百度能搜到该站</div>
+    </div>
+    <div class="card card-filter" data-status="not_indexed" title="只看未收录" role="button" tabindex="0">
+      <div class="label">未收录</div>
+      <div class="value bad" id="cNotIndexed">-</div>
+      <div class="hint">百度明确没有该站</div>
+    </div>
+    <div class="card card-filter" data-status="unknown_need_manual_check" title="只看查询失败" role="button" tabindex="0">
+      <div class="label">查询失败</div>
+      <div class="value warn" id="cUnknown">-</div>
+      <div class="hint">验证码/超时/解析失败，不是未收录</div>
+    </div>
+    <div class="card">
+      <div class="label">今日收录率</div>
+      <div class="value" id="cRate">-</div>
+      <div class="hint" id="cRateHint">不含查询失败</div>
+    </div>
+    <div class="card">
+      <div class="label">较昨日</div>
+      <div class="value" id="cDelta">-</div>
+    </div>
+    <div class="card">
+      <div class="label">打不开 / 异常</div>
+      <div class="value warn" id="cAnomaly">-</div>
+      <div class="hint" id="cSslHint">网站打不开或状态码异常</div>
+    </div>
+    <div class="card">
+      <div class="label">代理可用率</div>
+      <div class="value" id="cProxy">-</div>
+      <div class="hint" id="cProxyHint">-</div>
+    </div>
+    <div class="card">
+      <div class="label">最近任务</div>
+      <div class="value small" id="cRun">-</div>
+      <div class="hint" id="cProgress">-</div>
+    </div>
+  </section>
+
+  <section class="charts">
+    <div class="panel">
+      <div class="panel-title">收录率趋势（近 <span id="trendDays">30</span> 天）</div>
+      <div id="trendChart" class="chart"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">每日新增 / 掉收录</div>
+      <div id="diffChart" class="chart"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">
+      站点列表 <span class="hint" id="tableHint"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="siteTable">
+        <thead>
+          <tr>
+            <th class="col-check"><input id="checkAllPage" type="checkbox" title="全选本页"/></th>
+            <th data-sort="domain">域名</th>
+            <th data-sort="group_name">分组</th>
+            <th data-sort="index_status">收录</th>
+            <th>Title</th>
+            <th data-sort="http_status">状态码</th>
+            <th data-sort="response_ms">响应(ms)</th>
+            <th data-sort="last_checked_at">上次检测</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="siteRows"><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="prevPage" class="btn small ghost">上一页</button>
+      <span id="pageInfo" class="hint">-</span>
+      <button id="nextPage" class="btn small ghost">下一页</button>
+    </div>
+  </section>
+
+  <footer class="footer">
+    数据仅保存在本机 SQLite · 报告与证据目录位于 <code>data/</code> · 邮件未配置时只在本地落库报告
+  </footer>
+</main>
+
+<aside id="drawer" class="drawer hidden">
+  <div class="drawer-head">
+    <div>
+      <div class="drawer-title" id="drawerDomain">站点详情</div>
+      <div class="hint" id="drawerMeta">-</div>
+    </div>
+    <div class="drawer-head-actions">
+      <button id="drawerDelete" class="btn small danger">删除站点</button>
+      <button id="drawerClose" class="btn small ghost">关闭</button>
+    </div>
+  </div>
+  <div class="drawer-body">
+    <div id="drawerSummary" class="kv-grid"></div>
+    <div class="sub-title">单站历史曲线</div>
+    <div id="siteChart" class="chart small"></div>
+    <div class="sub-title">TDK</div>
+    <div id="drawerTdk" class="kv-grid"></div>
+    <div class="sub-title">收录证据</div>
+    <div id="drawerEvidence"></div>
+    <div class="sub-title">重定向链</div>
+    <ol id="drawerChain" class="chain"></ol>
+    <div class="sub-title">最近事件</div>
+    <ul id="drawerEvents" class="events"></ul>
+  </div>
+</aside>
+<div id="mask" class="mask hidden"></div>
+
+<div id="proxyModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="proxyModalTitle">
+  <div class="modal-box proxy-modal">
+    <div class="modal-head">
+      <div class="modal-title" id="proxyModalTitle">代理配置</div>
+      <button id="proxyModalClose" class="btn small ghost">关闭</button>
+    </div>
+    <div class="modal-body">
+      <div id="proxyStats" class="proxy-stats"></div>
+      <label class="checkbox browser-opt">
+        <input id="browserEnabled" type="checkbox" />
+        使用本机 Edge/Chrome 查收录和 TDK（独立配置，不占用你日常浏览器）
+      </label>
+      <label class="checkbox browser-opt">
+        <input id="browserShowWindow" type="checkbox" />
+        显示浏览器窗口（不勾选则后台静默查询）
+      </label>
+      <label class="checkbox browser-opt">
+        <input id="browserViaProxy" type="checkbox" />
+        浏览器查询百度和抓取 TDK 使用代理池 IP（建议保持开启）
+      </label>
+      <label class="browser-opt field-label" for="browserWindows">同时打开的查询窗口数（1–8，越大越快）</label>
+      <input id="browserWindows" class="input" type="number" min="1" max="8" value="1" />
+      <p id="proxyModeHint" class="hint api-hint">检测时顶部进度会写明本机直连还是代理 IP。点开站点详情也能看到「本次出口」。</p>
+
+      <div class="sub-title">当前代理池</div>
+      <div class="table-wrap">
+        <table id="proxyTable">
+          <thead>
+            <tr>
+              <th>地址</th><th>协议</th><th>来源</th><th>出口 IP</th><th>位置</th><th>延迟</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="proxyRows"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="sub-title">添加代理</div>
+      <div class="tabs" id="proxyTabs">
+        <button class="tab active" data-src="single">单条（手动/隧道）</button>
+        <button class="tab" data-src="batch">批量固定 IP</button>
+        <button class="tab" data-src="api">API 动态获取</button>
+      </div>
+
+      <!-- 单条 -->
+      <div id="srcSingle" class="src-panel">
+        <div class="form-grid">
+          <label class="field-label">类型</label>
+          <select id="singleType" class="input">
+            <option value="manual">手动代理</option>
+            <option value="tunnel">隧道代理（供应商轮换 IP）</option>
+          </select>
+          <label class="field-label">协议</label>
+          <select id="singleProtocol" class="input">
+            <option value="http">http</option>
+            <option value="https">https</option>
+            <option value="socks5">socks5</option>
+          </select>
+          <label class="field-label">主机</label>
+          <input id="singleHost" class="input" placeholder="例如 1.2.3.4" />
+          <label class="field-label">端口</label>
+          <input id="singlePort" class="input" type="number" placeholder="例如 8080" />
+          <label class="field-label">用户名（可选）</label>
+          <input id="singleUser" class="input" placeholder="可选" />
+          <label class="field-label">密码（可选）</label>
+          <input id="singlePass" class="input" type="password" placeholder="可选" />
+        </div>
+        <button id="singleSubmit" class="btn primary">添加代理</button>
+      </div>
+
+      <!-- 批量 -->
+      <div id="srcBatch" class="src-panel hidden">
+        <label class="field-label">每行一条：<code>host:port</code> 或 <code>host:port:user:pass</code></label>
+        <textarea id="batchInput" class="textarea" placeholder="1.2.3.4:8080&#10;5.6.7.8:8888:u:p"></textarea>
+        <div class="form-grid">
+          <label class="field-label">协议</label>
+          <select id="batchProtocol" class="input">
+            <option value="http">http</option>
+            <option value="https">https</option>
+            <option value="socks5">socks5</option>
+          </select>
+        </div>
+        <button id="batchSubmit" class="btn primary">批量添加</button>
+      </div>
+
+      <!-- API -->
+      <div id="srcApi" class="src-panel hidden">
+        <p class="hint api-hint">提取 API 每次请求都会返回新 IP。可选择仅在百度验证码/风控时切换，或每查询一个站切换。协议请选 <b>http</b>（不要选 https）。</p>
+        <div class="form-grid">
+          <label class="field-label">名称</label>
+          <input id="apiName" class="input" placeholder="可选，默认取 URL" />
+          <label class="field-label">API 地址（返回 IP 列表）</label>
+          <input id="apiUrl" class="input" placeholder="https://example.com/api/proxies" />
+          <label class="field-label">协议</label>
+          <select id="apiProtocol" class="input">
+            <option value="http">http</option>
+            <option value="https">https</option>
+            <option value="socks5">socks5</option>
+          </select>
+          <label class="field-label">用户名（可选）</label>
+          <input id="apiUser" class="input" placeholder="可选" />
+          <label class="field-label">密码（可选）</label>
+          <input id="apiPass" class="input" type="password" placeholder="可选" />
+          <label class="field-label">刷新间隔（分钟）</label>
+          <input id="apiInterval" class="input" type="number" value="30" />
+        </div>
+        <label class="field-label" for="apiRotateMode">IP 切换策略</label>
+        <select id="apiRotateMode" class="input">
+          <option value="captcha">遇到百度验证码/风控时切换 IP</option>
+          <option value="each">每查询一个站切换 IP</option>
+        </select>
+        <label class="checkbox"><input id="apiEnabled" type="checkbox" checked /> 按间隔自动刷新</label>
+        <button id="apiSave" class="btn primary">保存 API 源</button>
+
+        <div class="sub-title">已配置的 API 源</div>
+        <div class="table-wrap">
+          <table id="apiTable">
+            <thead>
+              <tr><th>名称</th><th>地址</th><th>策略</th><th>数量</th><th>上次</th><th>操作</th></tr>
+            </thead>
+            <tbody id="apiRows"><tr><td colspan="6" class="empty">暂无 API 源</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="proxyResult" class="add-result hidden"></div>
+    </div>
+    <div class="modal-foot">
+      <span id="proxyProgress" class="hint"></span>
+      <button id="proxyRefresh" class="btn ghost">刷新列表</button>
+    </div>
+  </div>
+</div>
+
+<div id="addSiteModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="addSiteModalTitle">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="modal-title" id="addSiteModalTitle">添加域名</div>
+      <button id="addModalClose" class="btn small ghost">关闭</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">粘贴域名（支持换行 / 逗号 / 空格分隔，自动去重、去空行）</label>
+      <textarea id="domainInput" class="textarea" placeholder="example.com&#10;test.com, foo.com&#10;bar.com"></textarea>
+      <label class="field-label">分组（可选，应用到本批全部域名）</label>
+      <input id="groupInput" class="input" placeholder="例如：默认分组" />
+      <div id="addResult" class="add-result hidden"></div>
+    </div>
+    <div class="modal-foot">
+      <span id="addProgress" class="hint"></span>
+      <button id="addSubmit" class="btn primary">批量添加</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

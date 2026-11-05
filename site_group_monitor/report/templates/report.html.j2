@@ -1,0 +1,196 @@
+{% block doc -%}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>站群监控日报 {{ report.stat_date }}</title>
+<style>
+  :root { --ok:#2e7d32; --bad:#c62828; --warn:#ef6c00; --gray:#607d8b; --bg:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:#222;
+         font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+  h1 { font-size:22px; margin:0 0 4px 0; }
+  .sub { color:#666; font-size:13px; margin-bottom:18px; }
+  .cards { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:22px; }
+  .card { background:#fff; border-radius:10px; padding:14px 18px; min-width:150px; flex:1;
+          box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .card .label { font-size:12px; color:#777; }
+  .card .value { font-size:24px; font-weight:600; margin-top:4px; }
+  section { background:#fff; border-radius:10px; padding:16px 18px; margin-bottom:18px;
+            box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  h2 { font-size:16px; margin:0 0 10px 0; padding-bottom:8px; border-bottom:1px solid #eee; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { padding:7px 8px; border-bottom:1px solid #f0f0f0; text-align:left; vertical-align:top; }
+  th { background:#fafafa; font-weight:600; color:#555; }
+  tbody tr:hover { background:#fbfdff; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:12px; color:#fff; }
+  .ok { background:var(--ok); } .bad { background:var(--bad); }
+  .warn { background:var(--warn); } .gray { background:var(--gray); }
+  .note { background:#fff8e1; border-left:3px solid #ffc107; padding:8px 12px;
+          font-size:13px; margin:6px 0; }
+  .empty { color:#999; font-size:13px; padding:6px 0; }
+  .kv { color:#666; font-size:12px; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+  <h1>站群监控日报 · {{ report.stat_date }}</h1>
+  <div class="sub">
+    生成时间：{{ generated_at }}（UTC） · 时区：{{ timezone }}
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">监控站点</div><div class="value">{{ report.total_sites }}</div></div>
+    <div class="card"><div class="label">今日收录率</div><div class="value">{{ index_rate_pct }}%</div>
+      <div class="kv">分母已排除「查询失败」{{ report.unknown_count }} 站</div></div>
+    <div class="card"><div class="label">较昨日</div>
+      <div class="value">{% if report.prev_rate is not none %}{{ (index_rate_pct - prev_rate_pct)|round(2) }} pt{% else %}-{% endif %}</div>
+      <div class="kv">昨日 {{ prev_rate_pct }}%</div></div>
+    <div class="card"><div class="label">新收录 / 掉收录</div>
+      <div class="value"><span style="color:var(--ok)">{{ report.new_indexed|length }}</span> /
+        <span style="color:var(--bad)">{{ report.lost_indexed|length }}</span></div></div>
+    <div class="card"><div class="label">查询失败</div>
+      <div class="value" style="color:var(--gray)">{{ report.need_manual|length }}</div></div>
+    <div class="card"><div class="label">异常站点</div>
+      <div class="value" style="color:var(--warn)">{{ report.anomalous_count }}</div>
+      <div class="kv">打不开或状态码异常</div></div>
+  </div>
+
+  {% if report.notes %}
+  <section>
+    <h2>说明</h2>
+    {% for note in report.notes %}<div class="note">{{ note }}</div>{% endfor %}
+  </section>
+  {% endif %}
+
+  {% if report.baseline_created %}
+  <section>
+    <h2>建立基线（{{ report.baseline_created|length }} 个）</h2>
+    <div class="kv">首次运行的站点只建立基线，不产生任何 diff 事件，避免误报。</div>
+    <div class="scroll" style="margin-top:8px">
+      <table>
+        <thead><tr><th>域名</th><th>日期</th></tr></thead>
+        <tbody>
+        {% for item in report.baseline_created[:100] %}
+          <tr><td>{{ item.domain }}</td><td>{{ item.stat_date }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>收录率趋势（近 {{ report.trend|length }} 天）</h2>
+    {% if trend_svg %}{{ trend_svg }}{% else %}<div class="empty">暂无足够历史数据绘制趋势图。</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>新增收录（{{ report.new_indexed|length }}）</h2>
+    {% if report.new_indexed %}
+    <table>
+      <thead><tr><th>域名</th><th>分组</th><th>变化</th><th>详情</th></tr></thead>
+      <tbody>
+      {% for item in report.new_indexed %}
+        <tr>
+          <td>{{ item.domain }}</td><td>{{ item.group_name }}</td>
+          <td><span class="tag gray">{{ item.old_value }}</span> → <span class="tag ok">{{ item.new_value }}</span></td>
+          <td class="kv">{{ item.detail.previous_date|default('') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">今日无新增收录。</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>掉收录（{{ report.lost_indexed|length }}）</h2>
+    {% if report.lost_indexed %}
+    <table>
+      <thead><tr><th>域名</th><th>分组</th><th>变化</th><th>HTTP</th></tr></thead>
+      <tbody>
+      {% for item in report.lost_indexed %}
+        <tr>
+          <td>{{ item.domain }}</td><td>{{ item.group_name }}</td>
+          <td><span class="tag ok">{{ item.old_value }}</span> → <span class="tag bad">{{ item.new_value }}</span></td>
+          <td>{{ item.detail.http_status|default('-') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">今日无掉收录站点。</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>查询失败（{{ report.need_manual|length }}）</h2>
+    {% if report.need_manual %}
+    <table>
+      <thead><tr><th>域名</th><th>原因码</th><th>证据</th></tr></thead>
+      <tbody>
+      {% for item in report.need_manual %}
+        <tr>
+          <td>{{ item.domain }}</td>
+          <td><span class="tag gray">{{ item.reason|default(item.event_type) }}</span></td>
+          <td class="kv">{{ item.evidence_path|default('-') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">无查询失败站点。</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>异常与健康预警（{{ report.anomalies|length }}）</h2>
+    {% if report.anomalies %}
+    <table>
+      <thead><tr><th>域名</th><th>类型</th><th>值</th><th>详情</th></tr></thead>
+      <tbody>
+      {% for item in report.anomalies %}
+        <tr>
+          <td>{{ item.domain }}</td>
+          <td><span class="tag warn">{{ item.kind|default(item.event_type) }}</span></td>
+          <td>{{ item.new_value }}</td>
+          <td class="kv">{{ item.detail|tojson(ensure_ascii=False) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">今日无健康异常。</div>{% endif %}
+  </section>
+
+  <section>
+    <h2>全站明细（{{ report.rows|length }}）</h2>
+    <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>域名</th><th>分组</th><th>收录</th><th>HTTP</th><th>响应(ms)</th>
+          <th>Title</th><th>检测时间</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in report.rows %}
+        <tr>
+          <td>{{ row.domain }}</td>
+          <td>{{ row.group_name }}</td>
+          <td>{% if row.index_status == 'indexed' %}<span class="tag ok">收录</span>
+              {% elif row.index_status == 'not_indexed' %}<span class="tag bad">未收录</span>
+              {% else %}<span class="tag gray">查询失败</span>{% endif %}</td>
+          <td>{{ row.http_status if row.http_status is not none else '-' }}</td>
+          <td>{{ row.response_ms if row.response_ms is not none else '-' }}</td>
+          <td title="{{ row.title }}">{{ row.title[:40] if row.title else '-' }}</td>
+          <td class="kv">{{ row.checked_at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <div class="sub" style="margin-top:20px">
+    由 site_group_monitor 生成本地离线报告 · 数据仅保存在本机
+  </div>
+</body>
+</html>
+{%- endblock %}
