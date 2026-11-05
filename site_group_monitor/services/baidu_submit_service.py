@@ -183,7 +183,7 @@ class BaiduSubmitService:
             # Cookie 已在同一浏览器配置中共享；只刷新后台原页即可确认登录状态。
             now = asyncio.get_running_loop().time()
             href = str(latest.get("href") or "")
-            if latest.get("loggedOut") and latest.get("onSubmitPage") \
+            if latest.get("loggedOut") and latest.get("onResourceSite") \
                     and now - last_refresh >= 3.0:
                 last_refresh = now
                 await browser.fetch(page_url)
@@ -231,23 +231,37 @@ _PAGE_STATE_JS = r"""
 (() => {
   const visible = (el) => !!el && el.getClientRects().length > 0;
   const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
-  const input = inputs.find(el => visible(el) && !/搜索|账号|密码/.test(el.placeholder || ''));
   const body = document.body ? document.body.innerText : '';
+  const buttons = Array.from(document.querySelectorAll('button,[role="button"]')).filter(visible);
+  const submitButton = buttons.find(el => /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
+    buttons.find(el => /提交/.test((el.innerText || '').trim()));
+  const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
+    `${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`
+  )) || inputs.find(el => {
+    if (!visible(el) || /搜索|账号|密码|手机|邮箱/.test(el.placeholder || '')) return false;
+    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"]') || {}).innerText || '';
+    return /链接提交|普通收录|请输入.*(?:链接|网址)/.test(areaText);
+  });
+  const passwordInput = Array.from(document.querySelectorAll('input[type="password"]')).find(visible);
   const feedbackNodes = Array.from(document.querySelectorAll(
     '.ant-message-notice-content,.ant-message,.toast,.message,[role="alert"]'
   )).filter(visible);
   const feedback = feedbackNodes.map(el => el.innerText || '').filter(Boolean).join(' | ');
   const captchaNode = Array.from(document.querySelectorAll('[class*="captcha"],[class*="verify"],.ant-modal'))
     .find(el => visible(el) && /验证|验证码|拖动|旋转/.test(el.innerText || body.slice(-1000)));
-  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' &&
-    location.pathname.startsWith('/linksubmit/url');
+  const onResourceSite = location.hostname === 'ziyuan.baidu.com';
   const loginPage = /(^|\.)passport\.baidu\.com$/.test(location.hostname) ||
     /\/login/.test(location.pathname);
+  const loggedOut = !!passwordInput || loginPage ||
+    /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body);
+  const submitFormReady = !!input && !!submitButton &&
+    /链接提交|普通收录|提交链接|请输入.*(?:链接|网址)/.test(body);
   return {
     href: location.href,
-    onSubmitPage,
-    hasInput: onSubmitPage && !!input && !/因您未登录|只可以浏览部分内容/.test(body),
-    loggedOut: loginPage || /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body),
+    onResourceSite,
+    submitFormReady,
+    hasInput: submitFormReady && !loggedOut,
+    loggedOut,
     captcha: !!captchaNode,
     inputValue: input ? (input.value || '') : '',
     feedback,
@@ -263,20 +277,28 @@ def _fill_and_click_script(url: str) -> str:
     encoded = json.dumps(url, ensure_ascii=False)
     return rf"""
 (async () => {{
-  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' &&
-    location.pathname.startsWith('/linksubmit/url');
-  if (!onSubmitPage) return {{clicked:false, message:'当前不是百度链接提交页'}};
   const visible = (el) => !!el && el.getClientRects().length > 0;
   const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
-  const input = inputs.find(el => visible(el) && !/搜索|账号|密码/.test(el.placeholder || ''));
+  const body = document.body ? document.body.innerText : '';
+  const input = inputs.find(el => visible(el) && /链接|网址|url/i.test(
+    `${{el.placeholder || ''}} ${{el.getAttribute('aria-label') || ''}}`
+  )) || inputs.find(el => {{
+    if (!visible(el) || /搜索|账号|密码|手机|邮箱/.test(el.placeholder || '')) return false;
+    const areaText = (el.closest('form,.ant-form,[class*="submit"],[class*="content"]') || {{}}).innerText || '';
+    return /链接提交|普通收录|请输入.*(?:链接|网址)/.test(areaText);
+  }});
   if (!input) return {{clicked:false, message:'未找到链接输入框'}};
+  if (!/链接提交|普通收录|提交链接|请输入.*(?:链接|网址)/.test(body)) {{
+    return {{clicked:false, message:'页面缺少链接提交区域'}};
+  }}
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
   if (setter && setter.set) setter.set.call(input, {encoded}); else input.value = {encoded};
   input.dispatchEvent(new Event('input', {{bubbles:true}}));
   input.dispatchEvent(new Event('change', {{bubbles:true}}));
   await new Promise(resolve => setTimeout(resolve, 200));
   const buttons = Array.from(document.querySelectorAll('button,[role="button"]'));
-  const button = buttons.find(el => visible(el) && /提交/.test((el.innerText || '').trim()));
+  const button = buttons.find(el => visible(el) && /^(提交|确认提交|立即提交)$/.test((el.innerText || '').trim())) ||
+    buttons.find(el => visible(el) && /提交/.test((el.innerText || '').trim()));
   if (!button) return {{clicked:false, message:'未找到提交按钮'}};
   if (button.disabled || button.getAttribute('aria-disabled') === 'true') {{
     return {{clicked:false, message:'提交按钮当前不可用'}};

@@ -27,7 +27,9 @@ def test_fill_script_safely_embeds_url() -> None:
     assert '\\"quoted\\"' in script
     assert "button.click()" in script
     assert SUBMIT_PAGE.startswith("https://ziyuan.baidu.com/")
-    assert "onSubmitPage && !!input" in _PAGE_STATE_JS
+    assert "submitFormReady && !loggedOut" in _PAGE_STATE_JS
+    assert "input[type=\"password\"]" in _PAGE_STATE_JS
+    assert "链接提交|普通收录" in _PAGE_STATE_JS
     assert "passport" in _PAGE_STATE_JS
 
 
