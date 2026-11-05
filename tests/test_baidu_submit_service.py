@@ -5,6 +5,7 @@ from __future__ import annotations
 from site_group_monitor.services.baidu_submit_service import (
     BaiduSubmitService,
     SUBMIT_PAGE,
+    _PAGE_STATE_JS,
     _fill_and_click_script,
 )
 
@@ -26,6 +27,8 @@ def test_fill_script_safely_embeds_url() -> None:
     assert '\\"quoted\\"' in script
     assert "button.click()" in script
     assert SUBMIT_PAGE.startswith("https://ziyuan.baidu.com/")
+    assert "onSubmitPage && !!input" in _PAGE_STATE_JS
+    assert "passport" in _PAGE_STATE_JS
 
 
 def test_submit_cancel_updates_state(tmp_settings) -> None:  # noqa: ANN001

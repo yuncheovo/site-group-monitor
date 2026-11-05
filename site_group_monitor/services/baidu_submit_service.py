@@ -114,7 +114,7 @@ class BaiduSubmitService:
             self._record(domain, False, f"提交页打开失败：{response.error_msg or response.status_code}")
             return
 
-        page = await self._wait_for_form(browser, timeout=300.0)
+        page = await self._wait_for_form(browser, page_url, timeout=300.0)
         if not page.get("hasInput"):
             self._record(domain, False, "等待登录或提交输入框超时")
             return
@@ -163,18 +163,30 @@ class BaiduSubmitService:
         else:
             self._record(domain, False, feedback or "未读取到百度的提交结果")
 
-    async def _wait_for_form(self, browser: LocalBrowser, timeout: float) -> dict[str, Any]:
+    async def _wait_for_form(
+        self, browser: LocalBrowser, page_url: str, timeout: float
+    ) -> dict[str, Any]:
         deadline = asyncio.get_running_loop().time() + timeout
         announced = False
+        last_refresh = 0.0
         latest: dict[str, Any] = {}
         while not self._cancel.is_set() and asyncio.get_running_loop().time() < deadline:
             latest = await self._page_state(browser)
             if latest.get("hasInput"):
+                await browser.reveal_current_page()
                 self._set_status("running", f"登录状态正常，准备提交 {self._state.current}")
                 return latest
             if latest.get("loggedOut") and not announced:
                 announced = True
                 self._set_status("waiting_login", "请在弹出的浏览器中登录百度账号，登录后将自动继续")
+            # 百度登录常在新标签页完成。受控的原提交页不会自动刷新，但新标签页写入的
+            # Cookie 已在同一浏览器配置中共享；只刷新后台原页即可确认登录状态。
+            now = asyncio.get_running_loop().time()
+            href = str(latest.get("href") or "")
+            if latest.get("loggedOut") and latest.get("onSubmitPage") \
+                    and now - last_refresh >= 3.0:
+                last_refresh = now
+                await browser.fetch(page_url)
             await asyncio.sleep(0.5)
         return latest
 
@@ -227,9 +239,15 @@ _PAGE_STATE_JS = r"""
   const feedback = feedbackNodes.map(el => el.innerText || '').filter(Boolean).join(' | ');
   const captchaNode = Array.from(document.querySelectorAll('[class*="captcha"],[class*="verify"],.ant-modal'))
     .find(el => visible(el) && /验证|验证码|拖动|旋转/.test(el.innerText || body.slice(-1000)));
+  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' &&
+    location.pathname.startsWith('/linksubmit/url');
+  const loginPage = /(^|\.)passport\.baidu\.com$/.test(location.hostname) ||
+    /\/login/.test(location.pathname);
   return {
-    hasInput: !!input,
-    loggedOut: /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body),
+    href: location.href,
+    onSubmitPage,
+    hasInput: onSubmitPage && !!input && !/因您未登录|只可以浏览部分内容/.test(body),
+    loggedOut: loginPage || /因您未登录|只可以浏览部分内容|立即登录|登录百度账号/.test(body),
     captcha: !!captchaNode,
     inputValue: input ? (input.value || '') : '',
     feedback,
@@ -245,6 +263,9 @@ def _fill_and_click_script(url: str) -> str:
     encoded = json.dumps(url, ensure_ascii=False)
     return rf"""
 (async () => {{
+  const onSubmitPage = location.hostname === 'ziyuan.baidu.com' &&
+    location.pathname.startsWith('/linksubmit/url');
+  if (!onSubmitPage) return {{clicked:false, message:'当前不是百度链接提交页'}};
   const visible = (el) => !!el && el.getClientRects().length > 0;
   const inputs = Array.from(document.querySelectorAll('textarea,input[type="text"],input:not([type])'));
   const input = inputs.find(el => visible(el) && !/搜索|账号|密码/.test(el.placeholder || ''));

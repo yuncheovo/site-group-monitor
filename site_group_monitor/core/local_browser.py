@@ -624,6 +624,11 @@ class LocalBrowser:
                 raise RuntimeError(str(result.get("description") or "页面脚本执行失败"))
             return result.get("value")
 
+    async def reveal_current_page(self) -> None:
+        """激活当前受控标签页，供需要用户交互的登录/验证码流程使用。"""
+        async with self._lock:
+            await self._reveal_window()
+
     async def _ensure_running(self, proxy: ProxyEndpoint | None) -> None:
         key = proxy.key if proxy else "direct"
         proc_alive = self._proc is not None and self._proc.poll() is None
