@@ -164,4 +164,6 @@ def test_index_page_available(client: TestClient) -> None:
     if "站群监控" in body:
         assert "删除站点" in body
         assert "site-del" in body or "drawerDelete" in body
+        assert 'id="btnRetryFailed"' in body
+        assert 'id="btnCopySelected"' in body
     _ = utcnow_iso()

@@ -50,6 +50,8 @@ body {
 }
 .btn:hover { border-color: var(--primary); color: var(--primary); }
 .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn.warn { color: var(--warn); border-color: #f2c28f; background: #fffaf3; }
+.btn.warn:hover { color: #c55400; border-color: var(--warn); background: #fff4e5; }
 #btnCheck { min-width: 84px; white-space: nowrap; }
 .btn.ghost { background: transparent; }
 .btn.small { height: 26px; padding: 0 8px; font-size: 12px; }

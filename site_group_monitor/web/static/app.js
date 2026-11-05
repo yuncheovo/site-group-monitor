@@ -21,6 +21,8 @@ const state = {
   checking: [],
   checkingKey: '',
   selected: new Set(),
+  failedTotal: 0,
+  checkLabel: '',
   statusTimer: null,
 };
 
@@ -89,6 +91,8 @@ async function loadOverview() {
     el('cIndexed').textContent = data.indexed_count ?? 0;
     el('cNotIndexed').textContent = data.not_indexed_count ?? 0;
     el('cUnknown').textContent = data.unknown_count ?? 0;
+    state.failedTotal = Number(data.unknown_count || 0);
+    updateSelectedButton();
     const unchecked = data.unchecked_count ?? 0;
     el('cTotalHint').textContent = unchecked
       ? `未检测 ${unchecked} · 点击查看全部`
@@ -357,6 +361,16 @@ function updateSelectedButton() {
   const count = state.selected.size;
   btn.disabled = count === 0 || _checkPolling;
   btn.textContent = count ? `检测选中 (${count})` : '检测选中';
+  const copyBtn = el('btnCopySelected');
+  if (copyBtn) {
+    copyBtn.disabled = count === 0;
+    copyBtn.textContent = count ? `复制选中 (${count})` : '复制选中';
+  }
+  const retryBtn = el('btnRetryFailed');
+  if (retryBtn) {
+    retryBtn.disabled = state.failedTotal === 0 || _checkPolling;
+    retryBtn.textContent = state.failedTotal ? `重查失败 (${state.failedTotal})` : '重查失败';
+  }
 }
 
 function syncSelectAllBox() {
@@ -494,14 +508,17 @@ function renderSiteChart(history) {
 /* ------------------------------------------------------------------ 操作 */
 let _checkPolling = false;
 let _lastSitesReload = 0;
+let _checkSeenRunning = false;
+let _checkStartedAt = 0;
 
-async function triggerCheck(domains) {
+async function triggerCheck(domains, options) {
   if (_checkPolling) return;
   const selected = Array.isArray(domains) ? domains.filter(Boolean) : [];
   const all = selected.length === 0;
-  const confirmText = all
+  const opts = options || {};
+  const confirmText = opts.confirmText || (all
     ? `确认检测全部 ${state.total || ''} 个站点？`
-    : `确认检测选中的 ${selected.length} 个站点？`;
+    : `确认检测选中的 ${selected.length} 个站点？`);
   if (!confirm(confirmText)) return;
   try {
     await api('/api/system/run', {
@@ -514,6 +531,7 @@ async function triggerCheck(domains) {
         domains: selected,
       }),
     });
+    state.checkLabel = opts.label || (all ? '全部站点' : `选中的 ${selected.length} 个站点`);
     // 接口「启动即返回」，进入进度轮询
     startCheckPolling();
   } catch (error) {
@@ -530,9 +548,12 @@ async function triggerCheck(domains) {
 function startCheckPolling() {
   if (_checkPolling) return;
   _checkPolling = true;
+  _checkSeenRunning = false;
+  _checkStartedAt = Date.now();
   el('btnCheck').disabled = true;
   el('btnCheck').textContent = '检测中…';
   el('btnCheckSelected').disabled = true;
+  el('btnRetryFailed').disabled = true;
   el('btnCancelCheck').classList.remove('hidden');
   pollCheckStatus(0);
 }
@@ -560,14 +581,34 @@ async function pollCheckStatus(failCount) {
     const scheduler = data.scheduler || {};
     const isCheckRunning = progress.phase === 'running';
     const isPipelineRunning = scheduler.pipeline_running === true;
+    if (isCheckRunning || isPipelineRunning) _checkSeenRunning = true;
     updateCheckProgress(progress, isCheckRunning || isPipelineRunning);
     // 详细数字已显示在进度卡和提示条；按钮保持固定文案，避免工具栏随数字宽度反复跳动。
     el('btnCheck').textContent = '检测中…';
 
     if (!isCheckRunning && !isPipelineRunning) {
+      // 启动接口先返回、后台线程后置位，首次轮询可能短暂看到 idle；避免误报“完成”。
+      if (!_checkSeenRunning && Date.now() - _checkStartedAt < 5000) {
+        setTimeout(() => pollCheckStatus(0), 500);
+        return;
+      }
+      const done = Number(progress.done || 0);
+      const total = Number(progress.total || 0);
+      const unknown = Number(progress.unknown || 0);
+      const label = state.checkLabel || '本轮站点';
+      let allUnknown = unknown;
+      try {
+        const overview = await api('/api/overview');
+        allUnknown = Number(overview.unknown_count || 0);
+        state.failedTotal = allUnknown;
+      } catch (error) {
+        console.warn('overview after check failed', error);
+      }
+      state.selected.clear();
+      state.checkLabel = '';
       stopCheckPolling();
       refreshAll();
-      alert('检测完成。');
+      alert(`${label}检测完成：已处理 ${done}/${total}；本轮查询失败 ${unknown} 个；当前全部查询失败 ${allUnknown} 个。\n可点击“重查失败”再次查询剩余失败站点。`);
       return;
     }
     const now = Date.now();
@@ -584,6 +625,77 @@ async function pollCheckStatus(failCount) {
       return;
     }
     setTimeout(() => pollCheckStatus(consecutiveFail), 1000);
+  }
+}
+
+async function loadAllFailedDomains() {
+  const result = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const data = await api('/api/sites?' + buildQuery({
+      index_status: 'unknown_need_manual_check', page, size: 500, sort: 'domain', desc: false,
+    }));
+    const items = data.items || [];
+    items.forEach((item) => {
+      if (item.domain) result.push(String(item.domain).toLowerCase());
+    });
+    total = Number(data.total || 0);
+    page += 1;
+  } while (result.length < total);
+  return Array.from(new Set(result));
+}
+
+async function retryFailedSites() {
+  if (_checkPolling) return;
+  const btn = el('btnRetryFailed');
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = '正在读取…';
+  try {
+    const domains = await loadAllFailedDomains();
+    if (!domains.length) {
+      state.failedTotal = 0;
+      updateSelectedButton();
+      alert('当前没有查询失败的站点。');
+      return;
+    }
+    await triggerCheck(domains, {
+      label: `${domains.length} 个查询失败站点`,
+      confirmText: `确认重新查询全部 ${domains.length} 个失败站点？`,
+    });
+  } catch (error) {
+    alert('读取失败站点失败：' + ((error && error.message) || '未知错误'));
+  } finally {
+    if (!_checkPolling) {
+      btn.textContent = oldText;
+      updateSelectedButton();
+    }
+  }
+}
+
+async function copySelectedDomains() {
+  const domains = selectedDomains();
+  if (!domains.length) return;
+  const text = domains.join('\n');
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      if (!document.execCommand('copy')) throw new Error('浏览器拒绝复制');
+      area.remove();
+    }
+    const btn = el('btnCopySelected');
+    btn.textContent = `已复制 ${domains.length} 个`;
+    window.setTimeout(updateSelectedButton, 1500);
+  } catch (error) {
+    alert('复制失败：' + ((error && error.message) || '请手动复制'));
   }
 }
 
@@ -1098,6 +1210,8 @@ document.addEventListener('DOMContentLoaded', () => {
   el('btnRefresh').addEventListener('click', refreshAll);
   el('btnCheck').addEventListener('click', () => triggerCheck([]));
   el('btnCheckSelected').addEventListener('click', () => triggerCheck(selectedDomains()));
+  el('btnCopySelected').addEventListener('click', copySelectedDomains);
+  el('btnRetryFailed').addEventListener('click', retryFailedSites);
   el('btnCancelCheck').addEventListener('click', cancelCheck);
   el('checkAllPage').addEventListener('change', (event) => {
     const checked = event.target.checked;
