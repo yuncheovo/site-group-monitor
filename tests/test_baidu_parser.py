@@ -19,6 +19,7 @@ from site_group_monitor.core.baidu_parser import (
     detect_captcha,
     detect_empty_hint,
     detect_nums_count,
+    detect_silent_risk,
     parse,
     parse_and_decide,
 )
@@ -97,6 +98,29 @@ def test_tiny_page_degrades_to_unknown() -> None:
     result = parse_and_decide("<html><body>hi</body></html>", "example.com")
     assert result.status == IndexStatus.UNKNOWN
     assert result.reason == IndexReasonCode.PARSE_FAILED
+
+
+def test_blank_baidu_search_shell_is_silent_risk() -> None:
+    """只有查询框、没有结果区的 HTTP 200 页面应触发重试，不能当未收录。"""
+    html = """
+    <html><head><title>site:example.com_百度搜索</title></head>
+    <body><div id="wrapper"><input value="site:example.com"><button>百度一下</button></div></body>
+    </html>
+    """
+    hit, marker = detect_silent_risk(html)
+    assert hit is True
+    assert marker == "blank_search_shell"
+    outcome = parse(html, "example.com")
+    assert outcome.has_silent_risk is True
+    result = decide(outcome, "example.com")
+    assert result.status == IndexStatus.UNKNOWN
+    assert result.reason == IndexReasonCode.SILENT_RISK
+
+
+def test_incomplete_baidu_document_is_silent_risk() -> None:
+    """代理只传回 head 时应识别成加载中断。"""
+    html = "<html><head><title>site:example.com_百度搜索</title></head></html>"
+    assert detect_silent_risk(html) == (True, "incomplete_document")
 
 
 def test_no_domain_match_is_not_indexed() -> None:

@@ -629,6 +629,71 @@ class LocalBrowser:
         async with self._lock:
             await self._reveal_window()
 
+    async def screenshot(self, clip: dict[str, float] | None = None) -> bytes:
+        """截取当前页面 PNG；``clip`` 可传视口坐标区域 ``{x, y, width, height}``。
+
+        供旋转验证码求解等流程获取页面图像。失败时返回空字节串，不抛异常。
+        """
+        async with self._lock:
+            await self._ensure_running(None)
+            if self._cdp is None or not self._session_id:
+                return b""
+            params: dict[str, Any] = {"format": "png", "fromSurface": True}
+            if clip:
+                params["clip"] = {**clip, "scale": 1.0}
+            with contextlib.suppress(Exception):
+                shot = await self._cdp.send(
+                    "Page.captureScreenshot", params, session_id=self._session_id, timeout=8.0
+                )
+                data = str((shot.get("result") or {}).get("data") or "")
+                if data:
+                    return base64.b64decode(data)
+            return b""
+
+    async def mouse_move(self, x: float, y: float, *, pressed: bool = False) -> None:
+        """CDP 输入事件：移动鼠标到视口坐标 (x, y)。``pressed`` 表示按键保持按下。"""
+        await self._dispatch_mouse(
+            "mouseMoved", x, y, button="left" if pressed else "none",
+            buttons=1 if pressed else 0,
+        )
+
+    async def mouse_down(self, x: float, y: float) -> None:
+        """CDP 输入事件：在视口坐标 (x, y) 按下鼠标左键。"""
+        await self._dispatch_mouse("mousePressed", x, y, button="left", buttons=1, click_count=1)
+
+    async def mouse_up(self, x: float, y: float) -> None:
+        """CDP 输入事件：在视口坐标 (x, y) 释放鼠标左键。"""
+        await self._dispatch_mouse("mouseReleased", x, y, button="left", buttons=0, click_count=1)
+
+    async def _dispatch_mouse(
+        self,
+        type_: str,
+        x: float,
+        y: float,
+        *,
+        button: str = "none",
+        buttons: int = 0,
+        click_count: int = 0,
+    ) -> None:
+        """经 CDP ``Input.dispatchMouseEvent`` 派发浏览器级鼠标事件（isTrusted）。"""
+        async with self._lock:
+            await self._ensure_running(None)
+            if self._cdp is None or not self._session_id:
+                raise RuntimeError("浏览器页面尚未就绪")
+            await self._cdp.send(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": type_,
+                    "x": float(x),
+                    "y": float(y),
+                    "button": button,
+                    "buttons": int(buttons),
+                    "clickCount": int(click_count),
+                },
+                session_id=self._session_id,
+                timeout=6.0,
+            )
+
     async def _ensure_running(self, proxy: ProxyEndpoint | None) -> None:
         key = proxy.key if proxy else "direct"
         proc_alive = self._proc is not None and self._proc.poll() is None

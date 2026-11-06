@@ -5,7 +5,7 @@
     pip install pyinstaller
     pyinstaller sgm.spec --noconfirm
 
-产物示例：`dist/站群监控-v0.1.9.exe`
+产物示例：`dist/站群监控-v0.1.11.exe`
 """
 
 from pathlib import Path
@@ -103,6 +103,11 @@ excludes = [
     "playwright._impl",
     "playwright.async_api",
     "playwright.sync_api",
+    # 旋转验证码模型属于源码运行时的可选能力。Torch 即使在函数内延迟导入，
+    # PyInstaller 仍会静态收集整个依赖树（约增加 126 MB）；单文件桌面版明确
+    # 排除，缺少时提交服务会自动回退到人工完成验证码。
+    "torch",
+    "torchvision",
     # Pillow：项目全目录无 import PIL，纯被捎带进来（约 12MB）
     "PIL",
 ]

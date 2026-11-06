@@ -5,6 +5,13 @@
 # 安装后还需执行：playwright install chromium
 playwright>=1.42.0
 
+# 百度链接提交旋转验证码自动求解（core/rotate_captcha.py，可选）
+# 未安装时自动降级为「浏览器内人工完成验证码」，不影响主链路。
+# 还需模型权重：data/models/rotate-captcha-crack/models/RotNetR/**/best.pth
+# （已随项目 data/ 目录部署；重新获取见 README「旋转验证码自动求解」）
+torch>=2.0
+torchvision>=0.15
+
 # Windows 托盘常驻 / 开机自启（R-022，本期不做）
 pystray>=0.19.4
 

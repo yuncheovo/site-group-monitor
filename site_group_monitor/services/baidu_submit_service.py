@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from urllib.parse import quote
 
 from site_group_monitor.core.local_browser import LocalBrowser
+from site_group_monitor.core.rotate_captcha import solve_or_wait_manual
 from site_group_monitor.models.entities import Site
 
 SUBMIT_PAGE = "https://ziyuan.baidu.com/linksubmit/url?sitename={}"
@@ -144,11 +145,11 @@ class BaiduSubmitService:
                 await self._cancelable_delay(2.0)
                 page = await self._page_state(browser)
         if page.get("captcha"):
-            self._set_status("waiting_captcha", f"{domain} 出现验证码，请在浏览器中手动完成")
-            page = await self._wait_until_captcha_done(browser, timeout=300.0)
-            if page.get("captcha"):
-                self._record(domain, False, "等待手动验证码超时")
+            solved = await self._handle_captcha(browser, domain)
+            if not solved:
+                self._record(domain, False, "验证码未通过（自动与人工均超时）")
                 return
+            page = await self._page_state(browser)
             captcha_feedback = f"{page.get('feedback', '')}\n{page.get('body', '')}"
             if not any(word in captcha_feedback for word in ("提交成功", "已提交", "已收录")) \
                     and str(page.get("inputValue") or "").strip():
@@ -200,6 +201,26 @@ class BaiduSubmitService:
                 await browser.fetch(page_url)
             await asyncio.sleep(0.5)
         return latest
+
+    async def _handle_captcha(self, browser: LocalBrowser, domain: str) -> bool:
+        """处理验证码：先自动求解（旋转验证码 CNN 模型），不可用或失败再转人工。"""
+        async def is_present() -> bool:
+            state = await self._page_state(browser)
+            return bool(state.get("captcha"))
+
+        async def manual() -> bool:
+            self._set_status("waiting_captcha", f"{domain} 出现验证码，请在浏览器中手动完成")
+            page = await self._wait_until_captcha_done(browser, timeout=300.0)
+            return not page.get("captcha")
+
+        return await solve_or_wait_manual(
+            browser,
+            self.settings,
+            self.logger,
+            is_present,
+            status_cb=lambda message: self._set_status("running", message),
+            manual_cb=manual,
+        )
 
     async def _wait_until_captcha_done(self, browser: LocalBrowser, timeout: float) -> dict[str, Any]:
         deadline = asyncio.get_running_loop().time() + timeout

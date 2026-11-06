@@ -178,6 +178,25 @@ diff 与基线规则、Repository 幂等与聚合、FastAPI 冒烟。
 
 ---
 
+## 7.1 旋转验证码自动求解（链接提交，可选能力）
+
+链接提交（`baidu-submit`）触发百度旋转验证码时，默认行为是**等人工在浏览器里拖动**。
+安装可选依赖后可全自动过码（CNN 模型预测回正角度 + CDP 输入事件模拟真人拖动）：
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+- 模型权重已部署在 `data/models/rotate-captcha-crack/`（RotNetR，约 70MB，百度验证码跨域测试平均误差 6.6°，
+  出自开源项目 [rotate-captcha-crack](https://github.com/lumina37/rotate-captcha-crack) v0.5.1，MIT 协议）；
+- 重新获取权重：下载其 GitHub Release 的 `RotNetR.7z` 解压出 `models/RotNetR/<时间戳>/best.pth`，
+  连同仓库中的 `rotate_captcha_crack/` 代码包放入该目录；
+- 求解逻辑在 `site_group_monitor/core/rotate_captcha.py`：最多换图重试 8 次，连续失败自动尝试反向角度；
+- **未装 torch / 缺权重时自动降级回人工模式**，主链路不受影响（进程内只报一次警告）；
+- 调用链：`services/baidu_submit_service.py` → `solve_or_wait_manual()`（自动优先，失败转人工等待 300 秒）。
+
+---
+
 ## 8. 已知限制
 
 1. **只实现百度引擎**（`SearchEngineChecker` 已抽象，搜狗/360 后续加子类即可）。

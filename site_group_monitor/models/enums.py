@@ -61,6 +61,7 @@ class IndexReasonCode(StrEnum):
     EMPTY_RESULT_PAGE = "empty_result_page"
     NO_DOMAIN_MATCH = "no_domain_match"
     CAPTCHA = "captcha"
+    SILENT_RISK = "silent_risk"
     NETWORK_ERROR = "network_error"
     PROXY_FAILED = "proxy_failed"
     PARSE_FAILED = "parse_failed"

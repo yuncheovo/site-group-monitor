@@ -36,6 +36,7 @@ class BaiduIndexChecker(SearchEngineChecker):
         params = {"wd": f"site:{domain}", "rn": rn, "ie": "utf-8"}
         proxy = ctx.proxy
         response = None
+        same_proxy_retry = False
 
         try:
             limiter_key = proxy.key if proxy is not None else "direct"
@@ -66,9 +67,27 @@ class BaiduIndexChecker(SearchEngineChecker):
                 return self._network_failure(response, proxy, elapsed)
 
             result = parse_and_decide(response.text, domain)
+            # 百度有时以 HTTP 200 返回只有搜索框、没有结果区的空白壳。
+            # 先在同一浏览器/IP 刷新一次，排除偶发的页面加载中断；普通结果不增加请求。
+            if (
+                result.reason == IndexReasonCode.SILENT_RISK
+                and browser is not None
+                and getattr(browser, "fetch", None) is not None
+            ):
+                same_proxy_retry = True
+                if self.logger is not None:
+                    self.logger.info("baidu_checker: %s 返回空白结果页，同 IP 自动刷新", domain)
+                refreshed = await browser.fetch(
+                    url, proxy=proxy, referer="https://www.baidu.com/"
+                )
+                if refreshed is not None and refreshed.ok and refreshed.text:
+                    response = refreshed
+                    result = parse_and_decide(response.text, domain)
+
+            elapsed = int((time.perf_counter() - started) * 1000)
             result.engine = self.engine
             result.http_status = response.status_code or None
-            result.elapsed_ms = response.elapsed_ms or elapsed
+            result.elapsed_ms = elapsed
             result.proxy_id = proxy.id if proxy is not None else None
 
             meta = {
@@ -78,6 +97,7 @@ class BaiduIndexChecker(SearchEngineChecker):
                 "final_url": response.final_url,
                 "proxy_id": result.proxy_id,
                 "reason": str(result.reason),
+                "same_proxy_retry": same_proxy_retry,
             }
             # 明确结果只保留压缩 HTML；异常结果同时保留可用截图，便于排障。
             result.evidence_path = self.evidence.save(domain, response.text, meta)
@@ -86,15 +106,23 @@ class BaiduIndexChecker(SearchEngineChecker):
                 if screenshot:
                     result.evidence_path = screenshot
 
-            if result.reason == IndexReasonCode.CAPTCHA:
+            if result.reason in (IndexReasonCode.CAPTCHA, IndexReasonCode.SILENT_RISK):
+                is_silent_risk = result.reason == IndexReasonCode.SILENT_RISK
                 result.error_type = ErrorType.CAPTCHA.value
-                result.error_msg = "百度触发验证码/风控"
+                result.error_msg = (
+                    "百度返回空白风控页，刷新后仍无结果"
+                    if is_silent_risk
+                    else "百度触发验证码/风控"
+                )
                 if self.proxies is not None:
                     self.proxies.report_captcha(proxy)
                     max_rotate = max(
                         0,
                         int(getattr(getattr(config, "captcha", None), "max_rotate", 3) or 0),
                     )
+                    # 空白风控页最多更换一次 IP，避免劣质代理让单站反复重启浏览器。
+                    if is_silent_risk:
+                        max_rotate = min(1, max_rotate)
                     if ctx.attempt <= max_rotate and hasattr(self.proxies, "rotate_after_captcha"):
                         replacement = await self.proxies.rotate_after_captcha(proxy)
                         if replacement is not None:

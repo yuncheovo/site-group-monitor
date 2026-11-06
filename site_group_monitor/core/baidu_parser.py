@@ -6,11 +6,12 @@
 |---|---|---|---|
 | 1 | HTTP 非 200 / 超时 / DNS / 代理失败 | unknown | network_error / proxy_failed |
 | 2 | 验证码 / 风控特征 | unknown | captcha |
-| 3 | 200 但正文 < 2KB 且无结果容器 | unknown | parse_failed |
-| 4 | 明确空结果文案 | not_indexed | empty_result_page |
-| 5 | 有结果 + nums>0 + 至少一个结果根域匹配 | indexed | ok_result_found |
-| 6 | 有结果但无一 host 匹配（site: 语法疑似被忽略） | unknown（触发窄化复核） | no_domain_match |
-| 7 | 结构异常 / XPath 全落空 | unknown | parse_failed |
+| 3 | 搜索框已出现但结果容器为空（隐性风控/加载中断） | unknown | silent_risk |
+| 4 | 200 但正文 < 2KB 且无结果容器 | unknown | parse_failed |
+| 5 | 明确空结果文案 | not_indexed | empty_result_page |
+| 6 | 有结果 + nums>0 + 至少一个结果根域匹配 | indexed | ok_result_found |
+| 7 | 有结果但无一 host 匹配（site: 语法疑似被忽略） | not_indexed | no_domain_match |
+| 8 | 结构异常 / XPath 全落空 | unknown | parse_failed |
 
 > 原则是「白名单优先于黑名单」：**只有证据充分才判 not_indexed**，其余一律降级 unknown。
 """
@@ -113,6 +114,44 @@ def detect_captcha(html: str) -> tuple[bool, str]:
     return False, ""
 
 
+def detect_silent_risk(html: str) -> tuple[bool, str]:
+    """识别百度返回 HTTP 200、但结果区为空的隐性风控页。
+
+    这类页面通常已经显示搜索框和 ``site:`` 查询词，却没有结果容器、
+    明确空结果文案或验证码。部分慢代理还会只收到完整 ``head``，没有
+    ``body``。两种情况都不能据此判断未收录，应由上层刷新/换 IP 重试。
+    """
+    text = html or ""
+    lower = text.lower()
+    title = extract_title(text).lower()
+    has_site_query = "site:" in title or re.search(
+        r"(?:value|content)=[\"'][^\"']*site%?3?a?[:：]?[A-Za-z0-9]",
+        text,
+        re.IGNORECASE,
+    ) is not None
+    if not has_site_query:
+        return False, ""
+
+    # 响应在 head 阶段中断：截图常见只剩搜索框，DOM 没有正文。
+    if "<body" not in lower:
+        return True, "incomplete_document"
+
+    has_search_shell = (
+        'id="wrapper"' in lower
+        or "id='wrapper'" in lower
+        or "百度一下" in text
+    )
+    has_result_area = (
+        'id="container"' in lower
+        or "id='container'" in lower
+        or 'id="content_left"' in lower
+        or "id='content_left'" in lower
+    )
+    if has_search_shell and not has_result_area:
+        return True, "blank_search_shell"
+    return False, ""
+
+
 def detect_empty_hint(html: str) -> tuple[bool, str]:
     """检测是否存在「明确空结果」文案。
 
@@ -189,6 +228,12 @@ def parse(html: str, domain: str) -> BaiduParseOutcome:
     outcome.has_captcha = has_captcha
     outcome.captcha_marker = marker
     if has_captcha:
+        return outcome
+
+    has_silent_risk, risk_marker = detect_silent_risk(html_text)
+    outcome.has_silent_risk = has_silent_risk
+    outcome.silent_risk_marker = risk_marker
+    if has_silent_risk:
         return outcome
 
     selector = _safe_selector(html_text)
@@ -365,6 +410,13 @@ def decide(outcome: BaiduParseOutcome, domain: str) -> IndexResult:
     if outcome.has_captcha:
         result.status = IndexStatus.UNKNOWN
         result.reason = IndexReasonCode.CAPTCHA
+        result.confidence = 0.0
+        return result
+
+    # 规则 3：百度返回搜索页空壳或正文加载中断，属于隐性风控/代理异常。
+    if outcome.has_silent_risk:
+        result.status = IndexStatus.UNKNOWN
+        result.reason = IndexReasonCode.SILENT_RISK
         result.confidence = 0.0
         return result
 

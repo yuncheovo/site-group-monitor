@@ -214,6 +214,8 @@ class BaiduParseOutcome(_BaseEntity):
 
     has_captcha: bool = False
     captcha_marker: str = ""
+    has_silent_risk: bool = False
+    silent_risk_marker: str = ""
     has_empty_hint: bool = False
     empty_hint_text: str = ""
     has_result_nodes: bool = False
